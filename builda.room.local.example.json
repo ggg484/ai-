@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "room": {
+    "room_id": "local-main",
+    "room_name": "本地测试房间",
+    "game_id": "local-game",
+    "tick_rate": 10,
+    "max_players": 4,
+    "entry_kind": "matchmaking",
+    "activity_id": "local-main",
+    "match_key": "main",
+    "match_mode": "room",
+    "room_route": "my-room",
+    "room_type": "authoritative"
+  },
+  "actors": [
+    { "player_id": "player-a", "seat_id": "seat-a", "team_id": "red" },
+    { "player_id": "player-b", "seat_id": "seat-b", "team_id": "blue" }
+  ],
+  "launch_context": {
+    "localOnly": true
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "local_mock_protocol_version": "2.2.0",
+  "transport": "local_mock_websocket",
+  "websocket_path": "/ws",
+  "health_path": "/health",
+  "config_path": "/config",
+  "room_scheduler": {
+    "max_concurrent_rooms": 64,
+    "max_sequential_rooms": 1000,
+    "initial_state": "idle",
+    "create_trigger": "first_admission",
+    "ticket_grace_millis": 15000,
+    "reconnect_grace_millis": 15000,
+    "empty_room_grace_millis": 1000,
+    "bots_keep_room_alive": false,
+    "dispose_reason_on_empty": "shutdown"
+  },
+  "room_directory": {
+    "config_source": "builda.online.json matchKeys via --online-config; without it every matchKey maps to one Room-mode policy from the Scenario",
+    "isolation": "each Room has its own Room instance, module state, Host, seats, tick and empty-Room reclaim",
+    "room_id": "opaque; the Scenario room_id while it is free, otherwise a generation-suffixed ID",
+    "room_mode": "automatic placement fills the fullest released public Room of the same matchKey, then creates one when allow_create and createPublicRoom allow it, otherwise the Ticket waits",
+    "room_id_admission": "public Room-mode Rooms (locked or released) and private Rooms; Pool/RankPool Rooms reject it",
+    "lock_release": "lockRoom/releaseRoom change discovery and automatic placement of public Room-mode Rooms only",
+    "pool_and_rank_pool": "formed locally from waiting single-player Tickets of the same matchKey: oldest first, exact teamCount x teamSize, RankPool score windows from expansionStages widening with the oldest wait, team averages balanced, Bot fill after botPolicy.defaultFillAfterSeconds within minimumHumanPlayers and maximumBotRatio; Rooms are always locked",
+    "private_rooms": "room_private_create when privateRoomsEnabled; never listed or auto-matched",
+    "one_seat_per_identity": true,
+    "error_codes": [
+      "MATCH_ACTIVITY_NOT_FOUND",
+      "ROOM_ADMISSION_MODE_FORBIDDEN",
+      "MATCH_ROLE_BUSY",
+      "ROOM_ROLE_BINDING_BUSY",
+      "ROOM_NOT_FOUND",
+      "ROOM_NOT_JOINABLE",
+      "ROOM_ADMISSION_INVALID",
+      "ROOM_FULL",
+      "ROOM_SEAT_NOT_COMMITTED",
+      "ROOM_PRESENCE_STALE",
+      "MATCH_TICKET_STALE",
+      "MATCH_ASSIGNMENT_STALE",
+      "ROOM_INTERNAL"
+    ],
+    "roster": "Room-mode and private Rooms use the Scenario roster; Pool/RankPool Rooms use the formation roster whose team IDs are team indexes (\"0\", \"1\", ...) and whose Bots are roster seats without users",
+    "confirm": "allMembers: an arriving player is connected_pending and receives match_connection_pending; local_room_join is answered and onJoin runs for everyone only when every human has arrived; at the deadline absent Tickets end as confirm_timeout and arrived Tickets return to waiting with their original age, a new version and round, and their pending join fails with MATCH_ASSIGNMENT_STALE",
+    "confirm_window": "min(confirmTimeoutSeconds, 15 s) so that client control requests (20 s) do not time out",
+    "ticket_deadline": "maxMatchSeconds (default 1800 s); a waiting Ticket then ends as timeout / match_deadline",
+    "room_close": "closing a Room (author close, runtime failure, empty-Room reclaim) ends only that Room; a Room closed during Confirm answers waiting joins with ROOM_NOT_FOUND and ends its Tickets as failed / room_lost",
+    "queue_while_seated": "a player in a Room may create a Ticket; Room-mode placement waits until the old Room is left, Pool/RankPool may reach RoomReady meanwhile; local_room_join into another Room while connected, pending or reconnecting elsewhere fails with ROOM_ROLE_BINDING_BUSY; a confirmed Ticket no longer blocks a new Admission",
+    "ticket_confirmation": "as online, a Ticket becomes confirmed only after local_room_joined answered the join, so its confirmed match_ticket_updated push arrives after the client holds the Room handle",
+    "rejoin_after_leave": "after local_room_leave a player cannot enter that Room again with an old Ticket or handle: local_room_join naming that room_id fails with ROOM_PRESENCE_STALE until a new Admission reserves a Seat there",
+    "ticket_ids": "each Admission gets a new Ticket ID (local-ticket-<player>, then -2, -3, ...); earlier Tickets stay readable in a bounded history"
+  },
+  "room_data_tunnel": {
+    "field": "frame_base64",
+    "decoded_format": "CYR1",
+    "note": "base64 is used only by the local WebSocket tunnel; online DataChannels send binary frames directly",
+    "control_pushes": [
+      "match_connection_pending"
+    ]
+  },
+  "request_types": [
+    "ping",
+    "auth",
+    "match_join_room",
+    "match_join_pool",
+    "match_join_rank_pool",
+    "match_ticket_get",
+    "match_ticket_heartbeat",
+    "match_ticket_cancel",
+    "room_get",
+    "room_list",
+    "room_private_create",
+    "room_credential",
+    "local_room_join",
+    "local_room_data",
+    "local_room_leave"
+  ],
+  "push_types": [
+    "match_ticket_updated",
+    "local_room_message"
+  ],
+  "not_simulated": [
+    "matchmaking_algorithm",
+    "party",
+    "lobby",
+    "invites",
+    "real_auth",
+    "gateway",
+    "webrtc",
+    "turn",
+    "distributed_recovery",
+    "capacity",
+    "security_isolation"
+  ]
+}

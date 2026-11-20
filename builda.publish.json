@@ -1,0 +1,24 @@
+{
+  "title": "沙城协议",
+  "tagline": "5v5 战术爆破 · 军械大厅",
+  "desc": "下载即进入 3D 军械大厅：数百名玩家同场、藏品墙自由试穿枪皮刀皮、三条靶道自由练习，左右传送点进入经典爆破 / 快速爆破 / 手枪局与大厅活动。",
+  "category": "shoot",
+  "engine": "h5",
+  "tags": [
+    "h5",
+    "fps",
+    "tactical",
+    "lobby",
+    "skin"
+  ],
+  "orientation": "landscape",
+  "minChromeMajor": 88,
+  "minIOSMajor": 15,
+  "languages": [
+    "zh",
+    "en"
+  ],
+  "coverKind": "palette",
+  "coverPalette": "ember",
+  "buildEntry": "index.html"
+}

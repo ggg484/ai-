@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "scenario": "room-switch-five-of-ten",
+  "source": {
+    "match_key": "lobby",
+    "members": [
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5",
+      "p6",
+      "p7",
+      "p8",
+      "p9",
+      "p10"
+    ]
+  },
+  "request": {
+    "request_id": "portal-round-42",
+    "match_key": "battle",
+    "role_ids": [
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5"
+    ]
+  },
+  "assertions": [
+    "exactly one new target for repeated identical request",
+    "selected five share the target; unselected five retain source",
+    "target never runs member gameplay before all selected connections and the commit decision",
+    "completed requires target join and full state",
+    "original source and switch ID persist across target reconnect/restore",
+    "source departure reason is room_switch",
+    "unknown response never authorizes source fallback"
+  ],
+  "fault_cases": [
+    {
+      "at": "target_activated_before_completion_notice",
+      "fault": "target data transport disconnects after its initial state but before the completion observer",
+      "expected": "replace the stale target transport, preserve one onJoin and one completion, never fall back to source"
+    },
+    {
+      "at": "after_cancel",
+      "fault": "a delayed notice or restore snapshot repeats the finished switch before the source disconnects",
+      "expected": "ignore the finished switch, reconnect the source normally and retain one failure notification"
+    },
+    {
+      "at": "before_commit",
+      "fault": "one selected client disconnects",
+      "expected": "reconnect with newer epoch before deadline or cancel entire selected group; preserve valid source membership"
+    },
+    {
+      "at": "after_commit",
+      "fault": "one selected client disconnects",
+      "expected": "recover target only within normal grace; do not restore source"
+    },
+    {
+      "at": "source_notice",
+      "fault": "drop notification",
+      "expected": "discover authenticated current operation before source reconnect"
+    },
+    {
+      "at": "target_connection",
+      "fault": "late callback from replaced transport",
+      "expected": "keep newer target connection"
+    },
+    {
+      "at": "cleanup",
+      "fault": "dependency unavailable",
+      "expected": "bounded automatic attempts; preserve durable cleanup and repair responsibility"
+    }
+  ],
+  "evidence": "These are offline fixture identities, not authentication credentials. Real online acceptance requires ten actual clients and both Activities."
+}

@@ -1,0 +1,19 @@
+CC0 扫描材质来源
+================
+
+本目录下的 WebP 由 ambientCG (https://ambientcg.com) 的 1K-JPG 材质转换而来。
+ambientCG 全部资产采用 Creative Commons CC0 1.0（公共领域），可商用、无需署名。
+
+源资产：
+- sand      <- Ground054
+- plaster   <- Plaster002
+- brick     <- Bricks097
+- concrete  <- Concrete034
+- metal     <- Metal032
+- wood      <- Wood066
+- sandstone <- Bricks084
+- fabric    <- Fabric030
+- marble    <- Marble021
+- polymer   <- Plastic006
+
+处理：Color/NormalGL 缩放到 512px，Roughness 缩放到 256px，转 WebP。

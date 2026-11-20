@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 3,
+  "onlineCompatibilityRevision": 1,
+  "roomTransfer": {
+    "snapshotSchemaVersion": 1,
+    "authoritativeState": [
+      "state.phase",
+      "state.hostUid",
+      "state.members",
+      "state.status",
+      "state.hostGeneration"
+    ],
+    "failureRecovery": "latest-checkpoint",
+    "pauseBudgetMillis": 1000
+  },
+  "source": "server/room",
+  "roomRoute": "my-room",
+  "roomType": "authoritative",
+  "version": "v1",
+  "tickRate": 10,
+  "matchKeys": {
+    "main": {
+      "mode": "room",
+      "teamCount": 1,
+      "teamSize": 4,
+      "publicMatchmaking": true,
+      "createPublicRoom": true,
+      "privateRoomsEnabled": true,
+      "recovery": "recoverable"
+    }
+  },
+  "roomParameters": {}
+}

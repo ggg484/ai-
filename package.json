@@ -1,0 +1,17 @@
+{
+  "name": "dust-protocol",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "description": "沙城协议 · Builda H5 5v5 战术爆破射击游戏（军械大厅 / 靶场 / 皮肤陈列）",
+  "scripts": {
+    "build": "node scripts/pack.mjs",
+    "pack": "node scripts/pack.mjs",
+    "dev": "node scripts/serve.mjs",
+    "smoke": "node tools/smoke.mjs",
+    "smoke:lobby": "node tools/smoke.mjs --no-xvfb --lobby"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

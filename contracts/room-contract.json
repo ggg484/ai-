@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "room_contract_version": "0.18.0",
+  "wit_package": "cysj:room@0.11.0",
+  "game_data_wit_package": "builda:game-data@2.0.0",
+  "game_config_wit_package": "builda:game-config@1.0.0",
+  "managed_queue_wit_package": "builda:managed-queue@1.0.0",
+  "async_runtime_wit_package": "builda:async-runtime@1.0.0",
+  "game_lifecycle_wit_package": "builda:game-lifecycle@1.0.0",
+  "room_data_protocol_version": "1.0.0",
+  "room_data_frame": {
+    "magic": "CYR1",
+    "header_bytes": 14,
+    "max_frame_bytes": 65535,
+    "type_length": "u16_be",
+    "sequence": "u64_be",
+    "payload": "opaque_bytes",
+    "channel_source": "webrtc_data_channel"
+  },
+  "lifecycle": [
+    "create",
+    "join",
+    "disconnect",
+    "reconnect",
+    "message",
+    "tick",
+    "checkpoint",
+    "restore",
+    "activated",
+    "leave",
+    "dispose"
+  ],
+  "channels": [
+    "control_reliable",
+    "game_reliable",
+    "state_unreliable"
+  ],
+  "host_commands": [
+    "log",
+    "broadcast",
+    "send",
+    "send_to_user",
+    "set_state",
+    "patch_state",
+    "lock_room",
+    "release_room",
+    "close_room",
+    "random_u64",
+    "unix_time_millis"
+  ],
+  "player_data_wit_package": "builda:player-data@1.0.0",
+  "async_sources": {
+    "game_data": 1,
+    "game_lifecycle": 2,
+    "managed_queue": 3,
+    "player_data": 4
+  },
+  "async_driver": {
+    "world": "room-switch-runtime",
+    "includes": "room-async",
+    "export": "builda:async-runtime/async-driver@1.0.0",
+    "entry": "drive",
+    "returns": "local-runnable-work",
+    "import": "builda:async-runtime/async-waker@1.0.0",
+    "request": "request-drive",
+    "typed_polls_per_round": 16,
+    "transforms_per_round": 4,
+    "rust_task_polls_per_round": 16
+  },
+  "room_switch": {
+    "interface": "cysj:room/room-switch@0.11.0",
+    "start": "JSON request_id, match_key, role_ids -> stable switch ID",
+    "poll": "JSON authoritative phase; submitting is only a local queued intent",
+    "max_members": 50,
+    "prepare_timeout_millis": 30000,
+    "origin": "launch_context.room_switch",
+    "legacy_worlds": [
+      "room",
+      "room-async"
+    ]
+  }
+}

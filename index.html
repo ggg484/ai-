@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0e1012">
+<title>沙城协议 · DUST PROTOCOL</title>
+<!-- 平台契约：必须根相对引用，SDK 文件本身不打进 zip -->
+<script src="builda-sdk.js"></script>
+<!-- 渲染分辨率上限：宿主通过 ?dpr=N 下发，必须早于渲染器初始化 -->
+<script src="mobile-perf.js"></script>
+<link rel="stylesheet" href="css/game.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+  <div id="perf" class="perf" aria-hidden="true"></div>
+<div id="grade"></div>
+  <div id="grain" aria-hidden="true"></div>
+
+<!-- ============ 启动 ============ -->
+<div id="boot" class="overlay boot-overlay">
+  <div class="boot-panel">
+    <div class="kicker">BUILDA H5 · TACTICAL LOBBY</div>
+    <h1 class="boot-logo">沙城协议</h1>
+    <p class="sub">DUST PROTOCOL · 战术军械大厅</p>
+    <div class="boot-bar"><span></span></div>
+    <p class="tiny" id="boot-text">正在接入平台…</p>
+  </div>
+</div>
+
+<!-- ============ HUD（对局） ============ -->
+<div id="hud" class="hidden">
+  <div class="hud-top">
+    <div class="radar-wrap">
+      <canvas id="radar" width="160" height="160"></canvas>
+      <div class="radar-label">SANDLINE</div>
+    </div>
+
+    <div class="round-box">
+      <div class="score"><span id="score-t">0</span><i>:</i><span id="score-ct">0</span></div>
+      <div class="timer" id="timer">1:40</div>
+      <div class="phase" id="phase">准备</div>
+    </div>
+
+    <div class="top-right">
+      <div class="round-no" id="round-no">回合 1</div>
+      <div class="fps" id="fps">-- fps</div>
+      <button id="btn-settings" class="hud-btn" type="button">设置</button>
+    </div>
+  </div>
+
+  <div class="killfeed" id="killfeed"></div>
+  <div class="objective" id="objective">在 A / B 点安放炸弹</div>
+
+  <div class="crosshair" id="crosshair">
+    <i class="ch-t"></i><i class="ch-b"></i><i class="ch-l"></i><i class="ch-r"></i><i class="ch-dot"></i>
+  </div>
+  <div class="hitmarker" id="hitmarker"></div>
+  <div class="damage-vignette" id="vignette"></div>
+
+  <div class="hud-bottom">
+    <div class="vitals">
+      <div class="bar hp"><span id="hp-fill"></span><b id="hp">100</b></div>
+      <div class="bar armor"><span id="armor-fill"></span><b id="armor">0</b></div>
+      <div class="money" id="money">$ 800</div>
+    </div>
+    <div class="weapon">
+      <div class="wname" id="wname">GLOCK-18</div>
+      <div class="ammo"><b id="ammo">20</b><span id="reserve">/ 60</span></div>
+      <div class="slots"><span data-slot="1" class="on">1</span><span data-slot="2">2</span><span data-slot="3">3</span></div>
+    </div>
+  </div>
+
+  <div class="plant-bar hidden" id="plant-bar"><span id="plant-fill"></span><em id="plant-text">安放中…</em></div>
+  <div class="bomb-status hidden" id="bomb-status">炸弹已安放 <b id="bomb-timer">40.0</b>s</div>
+</div>
+
+<!-- ============ 大厅 HUD ============ -->
+<div id="lobby-ui" class="hidden">
+  <div class="lobby-top">
+    <button id="btn-modes" class="portal-btn" type="button">
+      <span class="pb-mark">▲</span>
+      <span class="pb-copy"><b>作战传送</b><i>开始游戏 · 模式选择</i></span>
+    </button>
+
+    <div class="hall-status">
+      <span class="live-dot"></span>
+      <b id="hall-online">0</b><i>名玩家在场</i>
+      <em>沙城军械大厅 · SECTOR 01</em>
+    </div>
+
+    <button id="btn-activities" class="portal-btn right" type="button">
+      <span class="pb-copy"><b>活动传送</b><i>收藏家榜 · 大厅活动</i></span>
+      <span class="pb-mark">◆</span>
+    </button>
+  </div>
+
+  <div class="quick-tp" id="quick-tp" aria-label="快速传送">
+    <span class="qt-title">QUICK TP · 快速传送</span>
+    <button type="button" data-tp="gallery">中央展位</button>
+    <button type="button" data-tp="armory">藏品墙</button>
+    <button type="button" data-tp="range">靶场</button>
+    <button type="button" data-tp="mezz">二层看台</button>
+  </div>
+
+  <div class="lobby-feed" id="lobby-feed"></div>
+
+  <div class="lobby-brand">沙城协议 <i>DUST PROTOCOL</i></div>
+
+  <div class="lobby-crosshair" id="lobby-crosshair">
+    <i class="ch-t"></i><i class="ch-b"></i><i class="ch-l"></i><i class="ch-r"></i><i class="ch-dot"></i>
+  </div>
+
+  <div class="lobby-bottom">
+    <div class="player-card" id="player-card">
+      <div class="pc-badge" id="pc-badge">鉴</div>
+      <div class="pc-info">
+        <b id="pc-name">玩家</b>
+        <span id="pc-tier">鉴赏家</span>
+        <small id="pc-collection">收藏 12 件</small>
+      </div>
+    </div>
+
+    <div class="interact-wrap">
+      <div id="interact-prompt" class="interact-prompt hidden"><kbd>E</kbd><span id="interact-text">互动</span></div>
+      <div class="lobby-hint">移动 WASD / 摇杆 · 视角 拖动 · 走近展柜或传送门按 E</div>
+    </div>
+
+    <div class="lobby-actions">
+      <button id="btn-lobby-settings" class="lobby-chip" type="button">设置</button>
+      <button id="btn-lobby-return" class="lobby-chip hidden" type="button">返回大厅</button>
+    </div>
+  </div>
+
+  <div id="range-hud" class="range-hud hidden">
+    <div class="rh-head"><b id="rh-lane">01 · 手枪</b><span id="rh-dist">15 M</span></div>
+    <div class="rh-main"><b id="rh-score">0</b><i>分</i><span id="rh-acc">命中 0 / 0</span></div>
+    <div class="rh-foot">
+      <span id="rh-streak">连中 0</span>
+      <button id="btn-range-challenge" class="lobby-chip small" type="button">30 秒挑战</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 触屏控制 ============ -->
+<div id="touch" class="hidden">
+  <div class="stick-zone" id="stick-zone"><div class="stick-base"><div class="stick-knob" id="stick-knob"></div></div></div>
+  <div class="look-zone" id="look-zone"></div>
+  <div class="tbtns">
+    <button class="tbtn fire" data-act="fire">开火</button>
+    <button class="tbtn small jump" data-act="jump">跳</button>
+    <button class="tbtn small crouch" data-act="crouch">蹲</button>
+    <button class="tbtn small reload" data-act="reload">换弹</button>
+    <button class="tbtn small swap" data-act="switch">切枪</button>
+    <button class="tbtn small use" data-act="use">互动</button>
+    <button class="tbtn small buy" data-act="buy">购买</button>
+  </div>
+</div>
+
+<!-- ============ 检视模式 ============ -->
+<div id="photo-ui" class="hidden">
+  <div class="photo-head">
+    <div class="kicker">INSPECT · 3D 检视</div>
+    <h1 id="photo-title">AK-47</h1>
+    <div id="photo-sub" class="photo-sub"></div>
+  </div>
+  <div class="photo-meta" id="photo-meta"></div>
+  <button id="photo-close" class="photo-close" type="button">返回大厅 ×</button>
+  <div class="photo-nav" id="photo-nav"></div>
+</div>
+
+<!-- ============ 模式传送 ============ -->
+<div id="panel-modes" class="overlay hidden">
+  <div class="panel panel-wide">
+    <div class="panel-head">
+      <div><div class="kicker">WAR GATE · 作战传送</div><h2>选择对局模式</h2></div>
+      <button class="close" data-close="modes">×</button>
+    </div>
+    <div class="mode-grid" id="mode-grid"></div>
+    <div class="panel-foot"><span>所有模式共享同一套账号与藏品；当前版本不接入付费内容。</span></div>
+  </div>
+</div>
+
+<!-- ============ 活动传送 ============ -->
+<div id="panel-activities" class="overlay hidden">
+  <div class="panel panel-wide">
+    <div class="panel-head">
+      <div><div class="kicker">ACTIVITY GATE · 活动传送</div><h2>大厅活动</h2></div>
+      <button class="close" data-close="activities">×</button>
+    </div>
+    <div class="activity-grid" id="activity-grid"></div>
+    <div class="panel-foot"><span>活动仅提供展示与练习入口，不发放付费道具。</span></div>
+  </div>
+</div>
+
+<!-- ============ 藏品墙 ============ -->
+<div id="panel-skins" class="overlay hidden">
+  <div class="panel panel-wide skins-panel">
+    <div class="panel-head">
+      <div><div class="kicker">COLLECTION WALL · 藏品墙</div><h2>选择你的装备</h2></div>
+      <button class="close" data-close="skins">×</button>
+    </div>
+    <div class="skin-tabs" id="skin-tabs">
+      <button class="skin-tab on" data-weapon="ak" type="button">步枪</button>
+      <button class="skin-tab" data-weapon="glock" type="button">手枪</button>
+      <button class="skin-tab" data-weapon="knife" type="button">刀具</button>
+    </div>
+    <div class="skin-body">
+      <div class="skin-grid" id="skin-grid"></div>
+      <aside class="skin-detail" id="skin-detail">
+        <div class="sd-preview" id="sd-preview"></div>
+        <div class="sd-copy">
+          <div class="sd-rarity" id="sd-rarity">隐秘</div>
+          <h3 id="sd-name">赤线</h3>
+          <p id="sd-desc">选择一件藏品查看详情。</p>
+          <div class="sd-variant" id="sd-variant">
+            <b>久经沙场 · 0.2360</b><span>图案 886 · 偏移 0.71</span>
+          </div>
+          <div class="sd-actions">
+            <button id="btn-variant" class="ghost-btn compact" type="button">换一个品相</button>
+            <button id="btn-equip" class="primary" type="button">装备</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <div class="panel-foot"><span>当前版本所有藏品可自由试穿；购买与稀有度投放等付费方案裁定后开放。</span></div>
+  </div>
+</div>
+
+<!-- ============ 收藏家榜 ============ -->
+<div id="panel-board" class="overlay hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="kicker">COLLECTOR BOARD · 大厅陈列</div><h2>收藏家榜</h2></div>
+      <button class="close" data-close="board">×</button>
+    </div>
+    <div class="board-list" id="board-list"></div>
+    <div class="panel-foot"><span>榜单只统计藏品与展位，不提供任何战斗属性加成。</span></div>
+  </div>
+</div>
+
+<!-- ============ 展位详情 ============ -->
+<div id="panel-hero" class="overlay hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="kicker">SHOWCASE · 典藏展位</div><h2 id="hero-name">夜航</h2></div>
+      <button class="close" data-close="hero">×</button>
+    </div>
+    <div class="hero-detail">
+      <div class="hero-preview" id="hero-preview"></div>
+      <div class="hero-info">
+        <div class="hero-tier" id="hero-tier">典藏家</div>
+        <p id="hero-desc">展位皮肤可自由试穿。</p>
+        <div class="hero-stats" id="hero-stats"></div>
+        <button id="btn-hero-equip" class="primary" type="button">试穿这件藏品</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 公告 ============ -->
+<div id="panel-news" class="overlay hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="kicker">SECTOR NEWS · 大厅公告</div><h2>v0.2 军械大厅</h2></div>
+      <button class="close" data-close="news">×</button>
+    </div>
+    <div class="news-body">
+      <p>下载即进入大厅，不再有传统开始页。大厅常驻数百名玩家与四个典藏展位。</p>
+      <ul>
+        <li>中央陈列柱：鎏金爪刀，可绕行检视。</li>
+        <li>西侧藏品墙：步枪 / 手枪 / 刀具全量试穿。</li>
+        <li>东侧靶场：15 m / 25 m / 40 m 三条靶道，无限弹药。</li>
+        <li>东北 / 西北传送门：作战模式与大厅活动。</li>
+        <li>二层看台：可俯瞰大厅，普通玩家同样可上。</li>
+      </ul>
+      <p class="tiny">当前版本不包含充值、开箱或任何付费入口。</p>
+    </div>
+    <button class="primary" data-close="news" type="button">知道了</button>
+  </div>
+</div>
+
+<!-- ============ 购买 ============ -->
+<div id="buy" class="overlay hidden">
+  <div class="panel buy-panel">
+    <div class="panel-head"><h2>购买装备</h2><button class="close" data-close="buy">×</button></div>
+    <div class="buy-list" id="buy-list"></div>
+    <div class="buy-foot"><span>购买时间内待在出生区</span><b id="buy-money">$ 800</b></div>
+  </div>
+</div>
+
+<!-- ============ 设置 ============ -->
+<div id="settings" class="overlay hidden">
+  <div class="panel">
+    <div class="panel-head"><h2>设置</h2><button class="close" data-close="settings">×</button></div>
+    <label class="row">灵敏度 <input id="set-sens" type="range" min="0.4" max="3" step="0.05" value="1"></label>
+    <label class="row">视野 FOV <input id="set-fov" type="range" min="60" max="100" step="1" value="74"></label>
+    <label class="row">画质
+      <select id="set-quality">
+        <option value="low">低（省电）</option>
+        <option value="medium" selected>中</option>
+        <option value="high">高</option>
+      </select>
+    </label>
+    <p class="tiny">设置通过平台私有存档保存，换设备可恢复。</p>
+    <button class="primary" data-close="settings" type="button">完成</button>
+    <button id="btn-exit-match" class="ghost-btn hidden" type="button">返回大厅</button>
+  </div>
+</div>
+
+<!-- ============ 暂停 ============ -->
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <div class="kicker">PAUSED</div>
+    <h2>已暂停</h2>
+    <p class="sub">计时与模拟已停止。平台暂停面板关闭后自动恢复。</p>
+    <button id="btn-resume" class="primary" type="button">继续游戏</button>
+  </div>
+</div>
+
+<!-- ============ 回合结束 ============ -->
+<div id="round-end" class="overlay hidden">
+  <div class="panel end-panel">
+    <div class="kicker" id="end-kicker">ROUND OVER</div>
+    <h1 id="end-title">回合胜利</h1>
+    <p class="sub" id="end-sub">炸弹已引爆</p>
+    <p class="tiny">4 秒后进入下一回合</p>
+  </div>
+</div>
+
+<!-- ============ 对局结束 ============ -->
+<div id="match-end" class="overlay hidden">
+  <div class="panel end-panel">
+    <div class="kicker" id="me-kicker">MATCH OVER</div>
+    <h1 id="me-title">胜利</h1>
+    <p class="sub" id="me-sub">13 : 7</p>
+    <div class="me-stats" id="me-stats"></div>
+    <div class="me-actions">
+      <button id="btn-rematch" class="primary" type="button">再来一局</button>
+      <button id="btn-back-lobby" class="ghost-btn" type="button">返回大厅</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
