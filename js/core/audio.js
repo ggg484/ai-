@@ -113,6 +113,33 @@ class AudioBus {
         this.noise(0.9, 0.7 * vol, 'lowpass', 1800, 90);
         this.tone(70, 0.7, 0.3 * vol, 'sine', 30);
         break;
+      case 'throw':
+        this.noise(0.12, 0.28 * vol, 'highpass', 1600, 420);
+        break;
+      case 'he_bounce':
+        this.tone(560, 0.035, 0.08 * vol, 'square');
+        this.noise(0.035, 0.1 * vol, 'highpass', 2200);
+        break;
+      case 'he_explode':
+        this.noise(1.0, 0.85 * vol, 'lowpass', 2200, 70);
+        this.tone(64, 0.8, 0.38 * vol, 'sine', 26);
+        break;
+      case 'flash_explode':
+        this.noise(0.22, 0.5 * vol, 'highpass', 5200, 1200);
+        this.tone(2100, 0.16, 0.22 * vol, 'sine', 700);
+        break;
+      case 'smoke_pop':
+        this.tone(170, 0.12, 0.14 * vol, 'triangle', 90);
+        this.noise(0.55, 0.22 * vol, 'lowpass', 900, 180);
+        break;
+      case 'molotov_break':
+        this.noise(0.2, 0.42 * vol, 'highpass', 3000, 500);
+        this.tone(110, 0.16, 0.2 * vol, 'triangle', 60);
+        this.noise(0.6, 0.18 * vol, 'lowpass', 700, 160);
+        break;
+      case 'fire':
+        this.noise(0.45, 0.14 * vol, 'lowpass', 620, 180);
+        break;
       case 'win':
         this.tone(523, 0.12, 0.12 * vol);
         setTimeout(() => this.tone(784, 0.16, 0.12 * vol), 120);

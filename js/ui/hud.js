@@ -14,6 +14,7 @@ export class Hud {
       hp: $('hp'), hpFill: $('hp-fill'), armor: $('armor'), armorFill: $('armor-fill'),
       money: $('money'), wname: $('wname'), ammo: $('ammo'), reserve: $('reserve'),
       slots: document.querySelectorAll('.slots span'),
+      utility: $('utility'), flashBlind: $('flash-blind'),
       killfeed: $('killfeed'), objective: $('objective'),
       crosshair: $('crosshair'), hitmarker: $('hitmarker'), vignette: $('vignette'),
       plantBar: $('plant-bar'), plantFill: $('plant-fill'), plantText: $('plant-text'),
@@ -29,11 +30,19 @@ export class Hud {
     this.rctx = this.el.radar ? this.el.radar.getContext('2d') : null;
     this.onBuy = null;
     this.onSettings = null;
+    this.onUtility = null;
     this.playerSide = 't';
     this._vignetteT = null;
     this._endT = null;
     this._buildBuyList();
     this._bindSettings();
+    if (this.el.utility) {
+      this.el.utility.querySelectorAll('[data-util]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (this.onUtility) this.onUtility(btn.getAttribute('data-util'));
+        });
+      });
+    }
   }
 
   _buildBuyList() {
@@ -127,6 +136,24 @@ export class Hud {
   setPlayerSide(side) {
     this.playerSide = side === 'ct' ? 'ct' : 't';
     this._rosterKey = '';
+  }
+
+  setUtility(counts, selected) {
+    if (!this.el.utility) return;
+    this.el.utility.querySelectorAll('[data-util]').forEach((btn) => {
+      const type = btn.getAttribute('data-util');
+      const n = counts && counts[type] ? counts[type] : 0;
+      const badge = btn.querySelector('i');
+      if (badge) badge.textContent = n;
+      btn.classList.toggle('on', type === selected);
+      btn.classList.toggle('empty', n <= 0);
+    });
+  }
+
+  setBlind(t) {
+    if (!this.el.flashBlind) return;
+    const a = t > 0 ? Math.min(0.96, 0.18 + (Math.min(t, 4.9) / 4.9) * 0.78) : 0;
+    this.el.flashBlind.style.opacity = a;
   }
 
   setRound(n) { this.el.roundNo.textContent = '回合 ' + n; }
