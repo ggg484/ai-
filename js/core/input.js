@@ -15,10 +15,16 @@ const KEYMAP = {
   Digit1: 'slot1',
   Digit2: 'slot2',
   Digit3: 'slot3',
+  Digit4: 'util1',
+  Digit5: 'util2',
+  Digit6: 'util3',
+  Digit7: 'util4',
+  KeyG: 'throw',
   Tab: 'scoreboard'
 };
 
-const ONESHOT = new Set(['jump', 'reload', 'buy', 'switch', 'slot1', 'slot2', 'slot3', 'use']);
+const ONESHOT = new Set(['jump', 'reload', 'buy', 'switch', 'slot1', 'slot2', 'slot3', 'use',
+  'util1', 'util2', 'util3', 'util4', 'throw']);
 
 export class Input {
   constructor(canvas) {

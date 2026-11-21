@@ -126,6 +126,8 @@ i{font-style:normal}
 
 .damage-vignette{position:absolute;inset:0;opacity:0;transition:opacity .18s;
   background:radial-gradient(ellipse at center,transparent 45%,rgba(160,30,20,.55) 100%)}
+.flash-blind{position:fixed;inset:0;z-index:9;background:#fff;opacity:0;pointer-events:none;
+  transition:opacity .06s linear}
 
 .hud-bottom{position:absolute;left:calc(14px + var(--safe-left));right:calc(14px + var(--safe-right));
   bottom:calc(12px + var(--safe-bottom));display:flex;justify-content:space-between;align-items:flex-end}
@@ -144,6 +146,18 @@ i{font-style:normal}
 .slots{display:flex;gap:5px;justify-content:flex-end;margin-top:4px}
 .slots span{width:20px;height:16px;border:1px solid var(--line);font:600 10px/15px var(--mono);text-align:center;color:var(--muted)}
 .slots span.on{background:rgba(217,180,122,.2);border-color:var(--sand);color:var(--sand)}
+
+.utility{position:absolute;right:calc(18px + var(--safe-right));bottom:calc(222px + var(--safe-bottom));
+  display:flex;gap:4px;justify-content:flex-end;z-index:2;pointer-events:auto}
+.utility button{position:relative;width:34px;height:28px;border:1px solid rgba(236,231,216,.22);
+  background:rgba(10,12,9,.45);color:rgba(236,231,216,.75);border-radius:3px;
+  font:700 9px/1 var(--mono);letter-spacing:.04em;padding:0;cursor:pointer}
+.utility button b{display:block;font-size:9px}
+.utility button i{position:absolute;right:2px;bottom:1px;font:600 8px/1 var(--mono);font-style:normal;color:rgba(236,231,216,.55)}
+.utility button.on{border-color:var(--sand);color:var(--sand);background:rgba(217,180,122,.18);
+  box-shadow:0 0 0 1px rgba(217,180,122,.25) inset}
+.utility button.empty{opacity:.32}
+.utility button:active{background:rgba(224,106,53,.35)}
 
 .plant-bar{position:absolute;left:50%;bottom:calc(150px + var(--safe-bottom));transform:translateX(-50%);
   width:min(320px,54vw);height:22px;background:rgba(10,12,9,.7);border:1px solid var(--line);overflow:hidden}
@@ -227,6 +241,7 @@ i{font-style:normal}
 .tbtn.reload{right:36px;bottom:112px}
 .tbtn.swap{right:158px;bottom:86px}
 .tbtn.use{right:150px;bottom:10px;width:60px;height:60px;font-size:11px}
+.tbtn.throw{right:220px;bottom:86px;width:58px;height:58px;font-size:11px}
 
 /* ---------------- overlays ---------------- */
 .overlay{position:fixed;inset:0;z-index:30;display:grid;place-items:center;
@@ -558,7 +573,8 @@ h2{font-size:24px;letter-spacing:.02em}
 }
 /* 大厅触屏只保留移动/视角/互动；靶场才显示开火 */
 #touch.lobby .tbtn.fire,#touch.lobby .tbtn.jump,#touch.lobby .tbtn.crouch,
-#touch.lobby .tbtn.reload,#touch.lobby .tbtn.swap,#touch.lobby .tbtn.buy{display:none}
+#touch.lobby .tbtn.reload,#touch.lobby .tbtn.swap,#touch.lobby .tbtn.buy,
+#touch.lobby .tbtn.throw{display:none}
 #touch.lobby.range .tbtn.fire,#touch.lobby.range .tbtn.reload,#touch.lobby.range .tbtn.swap{display:block}
 #touch.lobby .tbtn.fire{right:0;bottom:6px;width:92px;height:92px;font-size:14px}
 #touch.lobby .tbtn.reload{right:36px;bottom:112px}

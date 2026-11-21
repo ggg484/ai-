@@ -95,9 +95,34 @@ export const ECONOMY = {
   plant: 300
 };
 
+// 投掷物：价格、引信、半径、持续时间都集中在这里。
+export const UTILITY = {
+  he: {
+    id: 'he', name: 'HE 手雷', slot: 4, price: 300,
+    fuse: 1.6, radius: 6.0, damage: 98, bounce: 0.4
+  },
+  flash: {
+    id: 'flash', name: '闪光弹', slot: 5, price: 200,
+    fuse: 1.5, radius: 12.0, maxBlind: 4.9, bounce: 0.4
+  },
+  smoke: {
+    id: 'smoke', name: '烟雾弹', slot: 6, price: 300,
+    fuse: 1.4, radius: 3.2, duration: 18, bounce: 0.35
+  },
+  molotov: {
+    id: 'molotov', name: '燃烧瓶', slot: 7, price: 400,
+    fuse: 0, radius: 3.0, duration: 7, bounce: 0
+  }
+};
+
+export const UTILITY_ORDER = ['he', 'flash', 'smoke', 'molotov'];
+
 export const BUY_ITEMS = [
   { id: 'ak', name: 'AK-47', desc: '一枪爆头，30 发弹道', price: 2700 },
   { id: 'armor', name: '护甲', desc: '吸收 50% 伤害，+100 护甲', price: 650 },
-  { id: 'he', name: 'HE 手雷', desc: '骨架版未实现，留作下一步', price: 300, enabled: false },
+  { id: 'he', name: 'HE 手雷', desc: '6 m 范围伤害', price: 300, utility: 'he' },
+  { id: 'flash', name: '闪光弹', desc: '致盲 1.5–4.9 s', price: 200, utility: 'flash' },
+  { id: 'smoke', name: '烟雾弹', desc: '18 s 视觉遮蔽', price: 300, utility: 'smoke' },
+  { id: 'molotov', name: '燃烧瓶', desc: '7 s 火区持续伤害', price: 400, utility: 'molotov' },
   { id: 'ammo', name: '备弹', desc: '当前武器补满备用弹药', price: 100 }
 ];

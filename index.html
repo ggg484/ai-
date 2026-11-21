@@ -67,6 +67,7 @@
   </div>
   <div class="hitmarker" id="hitmarker"></div>
   <div class="damage-vignette" id="vignette"></div>
+  <div class="flash-blind" id="flash-blind"></div>
 
   <div class="hud-bottom">
     <div class="vitals">
@@ -80,6 +81,13 @@
       <div class="ammo"><b id="ammo">20</b><span id="reserve">/ 60</span></div>
       <div class="slots"><span data-slot="1" class="on">1</span><span data-slot="2">2</span><span data-slot="3">3</span></div>
     </div>
+  </div>
+
+  <div class="utility" id="utility">
+    <button type="button" data-util="he" class="on" title="4 · HE 手雷"><b>HE</b><i>1</i></button>
+    <button type="button" data-util="flash" title="5 · 闪光弹"><b>FL</b><i>1</i></button>
+    <button type="button" data-util="smoke" title="6 · 烟雾弹"><b>SM</b><i>1</i></button>
+    <button type="button" data-util="molotov" title="7 · 燃烧瓶"><b>MO</b><i>1</i></button>
   </div>
 
   <div class="plant-bar hidden" id="plant-bar"><span id="plant-fill"></span><em id="plant-text">安放中…</em></div>
@@ -165,6 +173,7 @@
     <button class="tbtn small swap" data-act="switch">切枪</button>
     <button class="tbtn small use" data-act="use">互动</button>
     <button class="tbtn small buy" data-act="buy">购买</button>
+    <button class="tbtn small throw" data-act="throw">投掷</button>
   </div>
 </div>
 

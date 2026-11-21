@@ -15,12 +15,13 @@ import { Viewmodel } from './render/viewmodel.js';
 import { PhotoMode } from './render/photo.js';
 import { Bot } from './game/bots.js';
 import { Round, PHASE } from './game/round.js';
+import { GrenadeSystem } from './game/grenade.js';
 import { Hud } from './ui/hud.js';
 import { LobbyUI } from './ui/lobby-ui.js';
 import { Input } from './core/input.js';
 import { audio } from './core/audio.js';
 import * as Builda from './platform/builda.js';
-import { WEAPONS, ECONOMY } from './config/weapons.js';
+import { WEAPONS, ECONOMY, UTILITY, UTILITY_ORDER } from './config/weapons.js';
 import { GAME_MODES, MODE_MAP } from './config/modes.js';
 import { defaultProfile, TIERS, tierById, LOBBY_FEED, LEADERBOARD } from './config/lobby.js';
 import { SKIN_MAP, defaultVariant, entryId, entryVariant } from './config/skins.js';
@@ -126,6 +127,11 @@ export class Game {
     this.autostart = /[?&]autostart=1/.test(location.search);
 
     this.money = ECONOMY.start;
+    this.utility = { he: 1, flash: 1, smoke: 1, molotov: 1 };
+    this.selectedUtility = 'he';
+    this.throwCd = 0;
+    this.blindT = 0;
+    this.grenades = new GrenadeSystem(this);
     this.weaponCache = { glock: new Weapon('glock') };
     this.owned = { glock: true, ak: false };
     this.currentWeaponId = 'glock';
@@ -270,6 +276,7 @@ export class Game {
     });
 
     this.hud.onBuy = (item) => this.buy(item);
+    this.hud.onUtility = (type) => this.selectUtility(type);
     this.hud.onSettings = (s) => {
       this.settings.sensitivity = s.sensitivity;
       this.settings.fov = s.fov;
@@ -317,6 +324,8 @@ export class Game {
     this.matchOver = false;
     this.roundEnding = false;
     this.buyOpen = false;
+    this.grenades.clear();
+    this.blindT = 0;
     this.hud.showBuy(false);
     this.hud.hideRoundEnd();
     this.round.removeBomb();
@@ -425,6 +434,11 @@ export class Game {
     this.panelOpen = false;
     this.setPlayerSide('t');
     this.money = mode.startMoney || ECONOMY.start;
+    this.utility = { he: 1, flash: 1, smoke: 1, molotov: 1 };
+    this.selectedUtility = 'he';
+    this.throwCd = 0;
+    this.blindT = 0;
+    this.grenades.clear();
     this.owned = { glock: true, ak: false };
     this.currentWeaponId = 'glock';
     this.weapon = this.weaponCache.glock;
@@ -634,6 +648,11 @@ export class Game {
       this.money -= item.price;
       this.weapon.addAmmo();
       audio.play('reload', { volume: 0.5 });
+    } else if (item.utility) {
+      this.money -= item.price;
+      this.utility[item.utility] = Math.min(2, (this.utility[item.utility] || 0) + 1);
+      this.hud.setUtility(this.utility, this.selectedUtility);
+      audio.play('reload', { volume: 0.5 });
     }
     this.money = Math.max(0, this.money);
     this.hud.setMoney(this.money);
@@ -723,7 +742,11 @@ export class Game {
       return;
     }
 
+    this.throwCd = Math.max(0, this.throwCd - dt);
+    this.blindT = Math.max(0, this.blindT - dt);
+
     if (this.roundEnding) {
+      this.grenades.update(dt);
       this.round.update(dt);
       this._updateEffects(dt);
       return;
@@ -753,6 +776,7 @@ export class Game {
     }
 
     this.round.update(dt);
+    this.grenades.update(dt);
     this._updateEffects(dt);
   }
 
@@ -1028,6 +1052,12 @@ export class Game {
     if (input.consumePressed('buy')) { this.openBuy(); return; }
     if (!this.player.alive) return;
 
+    if (input.consumePressed('util1')) this.selectUtility('he');
+    if (input.consumePressed('util2')) this.selectUtility('flash');
+    if (input.consumePressed('util3')) this.selectUtility('smoke');
+    if (input.consumePressed('util4')) this.selectUtility('molotov');
+    const wantThrow = input.consumePressed('throw');
+
     if (input.consumePressed('slot1')) this.setWeapon('glock');
     if (input.consumePressed('slot2')) this.switchWeapon();
     if (input.consumePressed('slot3')) this.setWeapon('knife');
@@ -1041,6 +1071,8 @@ export class Game {
       input.consumePressed('fire');
       return;
     }
+
+    if (wantThrow) this.throwUtility();
 
     if (w.def.melee) {
       if (input.consumePressed('fire')) this._melee();
@@ -1067,6 +1099,36 @@ export class Game {
     this.hud.setAmmo(w.ammo, w.reserve);
     this._hitscan(shot.spread);
     Builda.vibrate(1);
+  }
+
+  selectUtility(type) {
+    if (!UTILITY[type]) return;
+    this.selectedUtility = type;
+    if (this.hud) this.hud.setUtility(this.utility, this.selectedUtility);
+  }
+
+  throwUtility() {
+    if (this.mode !== 'match' || !this.player.alive || this.buyOpen) return;
+    if (this.round.phase !== PHASE.LIVE && this.round.phase !== PHASE.PLANTED) return;
+    if (this.throwCd > 0) return;
+    const type = this.selectedUtility;
+    const def = UTILITY[type];
+    if (!def) return;
+    if (!this.utility[type]) {
+      this.hud.toast('没有 ' + def.name);
+      return;
+    }
+    const origin = this.player.eye(new THREE.Vector3());
+    const dir = this.player.aimDir(new THREE.Vector3());
+    origin.addScaledVector(dir, 0.35);
+    if (!this.grenades.throw(type, origin, dir)) return;
+    this.utility[type]--;
+    this.throwCd = 0.75;
+    this.hud.setUtility(this.utility, this.selectedUtility);
+    if (this.utility[type] <= 0) {
+      const next = UTILITY_ORDER.find((t) => this.utility[t] > 0);
+      if (next) this.selectUtility(next);
+    }
   }
 
   _melee() {
@@ -1423,6 +1485,8 @@ export class Game {
         if (this.currentWeaponId !== 'knife') this.hud.setAmmo(this.weapon.ammo, this.weapon.reserve);
         this.hud.setRound(this.round.round);
         this.hud.setScore(this.round.scoreT, this.round.scoreCT);
+        this.hud.setUtility(this.utility, this.selectedUtility);
+        this.hud.setBlind(this.blindT);
         this.hud.drawRadar(this.map, this.player, this.bots, this.round.bomb);
 
         const playerRows = [{
