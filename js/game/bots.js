@@ -56,6 +56,329 @@ function gunModel() {
 
 const ENEMY_TEAM = { t: 'ct', ct: 't' };
 
+/* ------------------------------------------------------------------ */
+/* 运行时导航网格 + A*                                                 */
+/* ------------------------------------------------------------------ */
+
+// 网格不依赖地图预烘焙数据：直接把 world 的碰撞盒按 Bot 通行半径膨胀后投影到格子。
+// 0.75 m 是「2 m 门口还能过」和「整图 2 万格以内」的折中；半径取 0.36（碰撞半径 0.29 + 余量）。
+const NAV_STEP = 0.75;
+const NAV_RADIUS = 0.36;
+const NAV_STEP_UP = 0.35;      // 与 world.move 的 stepHeight 对齐：更矮的东西能直接踩上去
+const NAV_BODY_H = 1.7;        // 通行净高：更高的横梁不挡路
+const NAV_CLEAR_CAP = 3;       // 离墙距离上限，用于让路径尽量走走廊中间
+const NAV_LIMIT = 26000;       // A* 单次展开上限，极端情况下宁可放弃也不卡帧
+const NAV_SQRT2 = Math.SQRT2;
+
+const NAV_DIRS = [
+  [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+  [1, 1, NAV_SQRT2], [1, -1, NAV_SQRT2], [-1, 1, NAV_SQRT2], [-1, -1, NAV_SQRT2]
+];
+
+const NAV_CACHE = new WeakMap();
+
+/** 每个 world 只建一张导航网格；地图重建（工坊预览）会拿到新的 world，自然失效。 */
+export function navFor(world) {
+  if (!world) return null;
+  let nav = NAV_CACHE.get(world);
+  if (!nav) {
+    nav = new NavGrid(world);
+    NAV_CACHE.set(world, nav);
+  }
+  return nav;
+}
+
+export class NavGrid {
+  /** @param world 有 boxes 或 colliders 的对象（世界碰撞盒是 AABB 数组） */
+  constructor(world) {
+    const boxes = (world && (world.boxes || world.colliders)) || [];
+
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (b.minX < minX) minX = b.minX;
+      if (b.maxX > maxX) maxX = b.maxX;
+      if (b.minZ < minZ) minZ = b.minZ;
+      if (b.maxZ > maxZ) maxZ = b.maxZ;
+    }
+    if (!Number.isFinite(minX)) { minX = -60; maxX = 60; minZ = -60; maxZ = 60; }
+
+    const pad = 1.5;
+    this.minX = minX - pad;
+    this.minZ = minZ - pad;
+    this.step = NAV_STEP;
+    this.w = Math.max(1, Math.ceil((maxX + pad - this.minX) / NAV_STEP));
+    this.h = Math.max(1, Math.ceil((maxZ + pad - this.minZ) / NAV_STEP));
+
+    const n = this.w * this.h;
+    this.walk = new Uint8Array(n);
+    this.clear = new Uint8Array(n);
+
+    // 只有「挡得住」的盒体才参与投影：能踩上去的台阶、头顶以上的横梁都不挡路。
+    const solid = [];
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (b.maxY <= NAV_STEP_UP || b.minY >= NAV_BODY_H) continue;
+      solid.push(b);
+    }
+
+    this.walk.fill(1);
+    for (let j = 0; j < this.h; j++) {
+      const cz = this.minZ + (j + 0.5) * this.step;
+      const row = j * this.w;
+      for (let i = 0; i < this.w; i++) {
+        const cx = this.minX + (i + 0.5) * this.step;
+        for (let k = 0; k < solid.length; k++) {
+          const b = solid[k];
+          if (cx + NAV_RADIUS > b.minX && cx - NAV_RADIUS < b.maxX &&
+              cz + NAV_RADIUS > b.minZ && cz - NAV_RADIUS < b.maxZ) {
+            this.walk[row + i] = 0;
+            break;
+          }
+        }
+      }
+    }
+
+    this._buildClearance(n);
+    this._alloc(n);
+  }
+
+  /** 从障碍物做一次 BFS，得到每格到最近墙的距离（封顶 NAV_CLEAR_CAP）。 */
+  _buildClearance(n) {
+    this.clear.fill(NAV_CLEAR_CAP);
+    const q = [];
+    for (let i = 0; i < n; i++) if (!this.walk[i]) { this.clear[i] = 0; q.push(i); }
+    for (let head = 0; head < q.length; head++) {
+      const idx = q[head];
+      const d = this.clear[idx];
+      if (d >= NAV_CLEAR_CAP - 1) continue;
+      const i = idx % this.w;
+      const j = (idx - i) / this.w;
+      for (let k = 0; k < 4; k++) {
+        const ni = i + (k === 0 ? 1 : k === 1 ? -1 : 0);
+        const nj = j + (k === 2 ? 1 : k === 3 ? -1 : 0);
+        if (ni < 0 || nj < 0 || ni >= this.w || nj >= this.h) continue;
+        const nb = nj * this.w + ni;
+        if (this.clear[nb] > d + 1) { this.clear[nb] = d + 1; q.push(nb); }
+      }
+    }
+  }
+
+  _alloc(n) {
+    this._g = new Float32Array(n);
+    this._from = new Int32Array(n);
+    this._seen = new Int32Array(n);
+    this._done = new Int32Array(n);
+    this._cap = Math.max(256, n * 4);
+    this._heap = new Int32Array(this._cap);
+    this._hf = new Float32Array(this._cap);
+    this._search = 0;
+  }
+
+  cellOf(x, z) {
+    const i = Math.floor((x - this.minX) / this.step);
+    const j = Math.floor((z - this.minZ) / this.step);
+    if (i < 0 || j < 0 || i >= this.w || j >= this.h) return -1;
+    return j * this.w + i;
+  }
+
+  cx(idx) { return this.minX + ((idx % this.w) + 0.5) * this.step; }
+  cz(idx) { return this.minZ + (Math.floor(idx / this.w) + 0.5) * this.step; }
+
+  isFree(x, z) {
+    const c = this.cellOf(x, z);
+    return c >= 0 && this.walk[c] === 1;
+  }
+
+  /** 起点/终点落在墙里时，向外找最近的可走格。 */
+  _nearestOpen(idx, maxRing) {
+    if (idx < 0) return -1;
+    if (this.walk[idx]) return idx;
+    const i0 = idx % this.w;
+    const j0 = (idx - i0) / this.w;
+    for (let r = 1; r <= maxRing; r++) {
+      for (let dj = -r; dj <= r; dj++) {
+        for (let di = -r; di <= r; di++) {
+          if (Math.abs(di) !== r && Math.abs(dj) !== r) continue;
+          const i = i0 + di, j = j0 + dj;
+          if (i < 0 || j < 0 || i >= this.w || j >= this.h) continue;
+          const nb = j * this.w + i;
+          if (this.walk[nb]) return nb;
+        }
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * A*。返回 [{x,z}] 世界坐标路径；不可达返回 null。
+   * avoid 传 {x,z,r} 时给该圆内的格子加重代价，用来绕开卡住的位置。
+   */
+  path(sx, sz, tx, tz, avoid) {
+    const s0 = this.cellOf(sx, sz);
+    const t0 = this.cellOf(tx, tz);
+    if (s0 < 0 || t0 < 0) return null;
+
+    const start = this._nearestOpen(s0, 4);
+    // 目标常常落在大障碍里（比如包点是 0.58 m 的高台），吸附半径要够大才找得到落脚点
+    const goal = this._nearestOpen(t0, 14);
+    if (start < 0 || goal < 0) return null;
+    if (start === goal) return [{ x: tx, z: tz }];
+
+    let avI = -1, avJ = -1, avR = 0;
+    if (avoid) {
+      const ac = this.cellOf(avoid.x, avoid.z);
+      if (ac >= 0) {
+        avI = ac % this.w;
+        avJ = (ac - avI) / this.w;
+        avR = Math.max(1, Math.ceil((avoid.r || 1) / this.step));
+      }
+    }
+
+    const search = ++this._search;
+    const W = this.w;
+    const g = this._g, from = this._from, seen = this._seen, done = this._done;
+    const clear = this.clear, walk = this.walk;
+    const gi = goal % W, gj = (goal - gi) / W;
+
+    // 二分堆，元素是格子下标，权重另存一份，避免对象分配。
+    const heap = this._heap, hf = this._hf;
+    let hs = 0;
+
+    const push = (idx, f) => {
+      let k = hs++;
+      while (k > 0) {
+        const p = (k - 1) >> 1;
+        if (hf[p] <= f) break;
+        heap[k] = heap[p]; hf[k] = hf[p]; k = p;
+      }
+      heap[k] = idx; hf[k] = f;
+    };
+    const pop = () => {
+      const top = heap[0];
+      const lastI = heap[--hs], lastF = hf[hs];
+      let k = 0;
+      while (true) {
+        let c = k * 2 + 1;
+        if (c >= hs) break;
+        if (c + 1 < hs && hf[c + 1] < hf[c]) c++;
+        if (hf[c] >= lastF) break;
+        heap[k] = heap[c]; hf[k] = hf[c]; k = c;
+      }
+      heap[k] = lastI; hf[k] = lastF;
+      return top;
+    };
+
+    // 启发函数：八方向 octile 距离
+    const hOf = (idx) => {
+      const i = idx % W, j = (idx - i) / W;
+      const dx = Math.abs(i - gi), dz = Math.abs(j - gj);
+      return (dx + dz) + (NAV_SQRT2 - 2) * Math.min(dx, dz);
+    };
+
+    seen[start] = search;
+    g[start] = 0;
+    from[start] = -1;
+    push(start, hOf(start));
+
+    let expanded = 0;
+    let found = false;
+    while (hs > 0) {
+      const cur = pop();
+      if (done[cur] === search) continue;
+      done[cur] = search;
+      if (cur === goal) { found = true; break; }
+      if (++expanded > NAV_LIMIT) break;
+
+      const ci = cur % W;
+      const cj = (cur - ci) / W;
+      const baseG = g[cur];
+
+      for (let d = 0; d < 8; d++) {
+        const dir = NAV_DIRS[d];
+        const ni = ci + dir[0];
+        const nj = cj + dir[1];
+        if (ni < 0 || nj < 0 || ni >= W || nj >= this.h) continue;
+        const nb = nj * W + ni;
+        if (!walk[nb] || done[nb] === search) continue;
+        // 禁止贴角切弯：斜向只有在两个正交邻格都可走时才允许
+        if (dir[0] !== 0 && dir[1] !== 0) {
+          if (!walk[cj * W + ni] || !walk[nj * W + ci]) continue;
+        }
+
+        // 走廊居中：贴墙格加价，让路径自然落在门口中线
+        let cost = dir[2] + Math.max(0, NAV_CLEAR_CAP - clear[nb]) * 0.45;
+        if (avR > 0 && Math.abs(ni - avI) <= avR && Math.abs(nj - avJ) <= avR) cost += 6;
+
+        const ng = baseG + cost;
+        if (seen[nb] !== search || ng < g[nb]) {
+          seen[nb] = search;
+          g[nb] = ng;
+          from[nb] = cur;
+          if (hs >= this._cap - 1) continue;   // 堆满就丢弃，宁可路径差一点也不能崩
+          push(nb, ng + hOf(nb));
+        }
+      }
+    }
+
+    if (!found) return null;
+
+    const cells = [];
+    for (let c = goal; c >= 0; c = from[c]) cells.push(c);
+    cells.reverse();
+
+    const pts = this._smooth(cells);
+    // 终点用真实坐标收尾（目标点本身可走时），避免停在格子中心差半米
+    if (this.isFree(tx, tz)) pts.push({ x: tx, z: tz });
+    return pts;
+  }
+
+  /** 视线内能直连的路径点合并；但门口这类窄格必须保留，避免切角卡门框。 */
+  _smooth(cells) {
+    const pts = [];
+    const clear = this.clear;
+    let i = 0;
+    pts.push({ x: this.cx(cells[0]), z: this.cz(cells[0]) });
+    while (i < cells.length - 1) {
+      let best = i + 1;
+      for (let j = i + 2; j < cells.length; j++) {
+        let must = false;
+        for (let k = i + 1; k < j; k++) {
+          if (clear[cells[k]] <= 1) { must = true; break; }
+        }
+        if (must) break;
+        if (!this._lineClear(cells[i], cells[j])) break;
+        best = j;
+      }
+      pts.push({ x: this.cx(cells[best]), z: this.cz(cells[best]) });
+      i = best;
+    }
+    return pts;
+  }
+
+  _lineClear(a, b) {
+    const W = this.w;
+    const i0 = a % W, j0 = (a - i0) / W;
+    const i1 = b % W, j1 = (b - i1) / W;
+    const di = i1 - i0, dj = j1 - j0;
+    const steps = Math.max(Math.abs(di), Math.abs(dj)) * 2;
+    if (steps === 0) return true;
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps;
+      const i = Math.round(i0 + di * t);
+      const j = Math.round(j0 + dj * t);
+      if (!this.walk[j * W + i]) return false;
+    }
+    return true;
+  }
+
+  stats() {
+    let free = 0;
+    for (let i = 0; i < this.walk.length; i++) if (this.walk[i]) free++;
+    return { w: this.w, h: this.h, step: this.step, cells: this.walk.length, free };
+  }
+}
+
 export class Bot {
   /**
    * @param {THREE.Scene} scene
@@ -71,6 +394,8 @@ export class Bot {
     this.rig = normalizeCharRig(o.rig || DEFAULT_CHAR_RIG);
     this.label = (this.team === 't' ? 'T-' : 'CT-') + (++teamSeq[this.team]);
     this.world = world;
+    // 导航网格按 world 缓存，9 个 Bot 共用一张，只在首个 Bot 构造时建一次。
+    this.nav = navFor(world);
     this.spawn = { x: spawn.x, z: spawn.z, yaw: spawn.yaw || 0 };
     this.pos = new THREE.Vector3(spawn.x, 0, spawn.z);
     this.vel = new THREE.Vector3();
@@ -83,6 +408,13 @@ export class Bot {
     this.waypoint = this.spawnWaypoint;
     this.stuck = 0;
     this.lastPos = this.pos.clone();
+    // 导航状态：path 是平滑后的世界坐标折线，pathI 是当前追的点
+    this.path = [];
+    this.pathI = 0;
+    this.pathT = 0;
+    this._avoid = null;
+    this._stuckStage = 0;
+    this._wasEngage = false;
     this.engage = false;
     this.flashT = 0;
     this.hitT = 0;
@@ -250,6 +582,12 @@ export class Bot {
     this.crouchT = 0;
     this.aimed = false;
     this.waypoint = this.spawnWaypoint;
+    this.path = [];
+    this.pathI = 0;
+    this.pathT = 0;
+    this._avoid = null;
+    this._stuckStage = 0;
+    this._wasEngage = false;
     this.marker.visible = false;
     this.group.visible = true;
     this.group.rotation.set(0, (this.spawn.yaw || 0) + Math.PI, 0);
@@ -370,23 +708,25 @@ export class Bot {
           this.muzzleT = 0.06;
           this.shootAnim = 1;
           this.flash.visible = true;
-          cb.onBotShoot(this, this._rollShot(this.eye(this._eye), target.eye, dist, target.player), target);
+          // 回调要的是「被打的单位」本身（Bot 或 player），不是 _pickTarget 的包装对象：
+          // game._onBotShoot 里直接调 target.eye()/target.damage()，传包装对象会 TypeError。
+          cb.onBotShoot(this, this._rollShot(this.eye(this._eye), target.eye, dist, target.player), target.unit);
         }
       }
     } else {
       this.reaction = 0;
-      const wp = waypoints[this.waypoint % waypoints.length];
-      const wdx = wp.x - this.pos.x, wdz = wp.z - this.pos.z;
-      const wd = Math.hypot(wdx, wdz);
-      if (wd < 1.8) {
-        this.waypoint++;
-      } else {
-        moveX = wdx / wd;
-        moveZ = wdz / wd;
-        speed = 2.2;
-        faceYaw = Math.atan2(moveX, moveZ) + Math.PI;
+      // 追人时走的不是导航路径，脱战瞬间原路径已经过时，直接作废重算
+      if (this._wasEngage) {
+        this.path.length = 0;
+        this.pathT = 0;
       }
+      const steer = this._steerToGoal(dt, waypoints);
+      moveX = steer.x;
+      moveZ = steer.z;
+      speed = steer.speed;
+      faceYaw = steer.yaw;
     }
+    this._wasEngage = canSee;
 
     const len = Math.hypot(moveX, moveZ);
     if (len > 0.01) {
@@ -401,11 +741,29 @@ export class Bot {
 
     const moved = this.pos.distanceTo(this.lastPos);
     this.lastPos.copy(this.pos);
-    if (len > 0.01 && moved < 0.12 * Math.min(1, dt * 60)) {
+    // 阈值必须按「本帧应有的位移」算：写死米数会把 60 fps 下的正常行走误判成卡住。
+    const want = len > 0.01 ? speed * dt : 0;
+    if (want > 0.001 && moved < Math.max(0.004, want * 0.4)) {
       this.stuck += dt;
-      if (this.stuck > 0.9) { this.waypoint++; this.stuck = 0; }
+      // 卡住分两级：0.45 s 先把脚下当成临时障碍重算路径；1.6 s 还没动静就换航点。
+      // 两级合起来保证 < 2 s 一定能恢复，不会出现 Bot 顶墙站一回合。
+      if (this._stuckStage === 0 && this.stuck > 0.45) {
+        this._stuckStage = 1;
+        this._avoid = { x: this.pos.x, z: this.pos.z, r: 1.1 };
+        this.path.length = 0;
+        this.pathT = 0;
+      } else if (this.stuck > 1.6) {
+        this._stuckStage = 0;
+        this.stuck = 0;
+        this._avoid = null;
+        this.waypoint++;
+        this.path.length = 0;
+        this.pathT = 0;
+      }
     } else {
       this.stuck = 0;
+      this._stuckStage = 0;
+      this._avoid = null;
     }
 
     // 平滑转向，避免瞬间「贴脸转圈」
@@ -428,6 +786,61 @@ export class Bot {
       animateHumanoid(this.humanoid, dt, len > 0.01 ? speed : 0, this.engage);
     }
     this.group.position.copy(this.pos);
+  }
+
+  /** 巡逻：沿 A* 路径走向当前航点，到点后换下一个。 */
+  _steerToGoal(dt, waypoints) {
+    const out = { x: 0, z: 0, speed: 0, yaw: this.group.rotation.y };
+    const list = waypoints;
+    if (!list || !list.length) return out;
+
+    const n = list.length;
+    let goal = list[((this.waypoint % n) + n) % n];
+
+    // 到点（1.6 m 容差）：换下一个航点
+    if (Math.hypot(goal.x - this.pos.x, goal.z - this.pos.z) < 1.6) {
+      this.waypoint++;
+      this.path.length = 0;
+      goal = list[((this.waypoint % n) + n) % n];
+    }
+
+    this.pathT -= dt;
+    if (!this.path.length && this.pathT <= 0) this._buildPath(goal);
+
+    // 追当前路径点；到 0.5 m 内就切下一个
+    let tx = goal.x;
+    let tz = goal.z;
+    while (this.pathI < this.path.length) {
+      const p = this.path[this.pathI];
+      if (Math.hypot(p.x - this.pos.x, p.z - this.pos.z) > 0.5) { tx = p.x; tz = p.z; break; }
+      this.pathI++;
+    }
+
+    const dx = tx - this.pos.x;
+    const dz = tz - this.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.001) return out;
+
+    out.x = dx / d;
+    out.z = dz / d;
+    // 门口/贴墙处收一点速度，减少撞门框后反复重试
+    const cell = this.nav ? this.nav.cellOf(this.pos.x, this.pos.z) : -1;
+    out.speed = (cell >= 0 && this.nav.clear[cell] <= 1) ? 1.55 : 2.2;
+    out.yaw = Math.atan2(out.x, out.z) + Math.PI;
+    return out;
+  }
+
+  _buildPath(goal) {
+    this.pathT = 0.6;                        // 算失败也别每帧重算
+    const pts = this.nav
+      ? this.nav.path(this.pos.x, this.pos.z, goal.x, goal.z, this._avoid)
+      : null;
+    this._avoid = null;
+    // 起点格心通常在 Bot 身后：留着会让它先倒退半步，直接丢掉
+    if (pts && pts.length > 1 &&
+        Math.hypot(pts[0].x - this.pos.x, pts[0].z - this.pos.z) < 1.2) pts.shift();
+    this.path = pts || [];
+    this.pathI = 0;
   }
 
   /** 枪始终握在右手：位置跟随手骨，朝向固定在身体正前方。 */
