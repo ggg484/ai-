@@ -32,9 +32,10 @@
 
 ## 共享文件
 
-`index.html`、`js/game.js`、`js/main.js`、`package.json`、`README.md`、`collab/`。
+`index.html`、`js/game.js`、`js/main.js`、`js/core/`、`js/ui/`、`js/config/`、`js/platform/`、`package.json`、`README.md`、`collab/`。
 
 改之前必须在 `collab/locks.json` 里出现你的锁；没有锁就先别改。
+例外：新建 `collab/tasks/*.md` 或 `collab/inbox/**` 不用锁；改 `locks.json`、`state.json`、`STATE.md`、`README.md` 要锁。
 两个 AI 同时改共享文件时，后到的先等，或者拆文件。
 
 ## 交接单

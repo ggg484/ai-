@@ -115,7 +115,7 @@ npm run smoke:lobby
 - 分支：`main` 稳定线；`agent/trae`、`agent/other` 为两侧集成分支；任务分支 `task/<name>/<task-id>-<slug>`。
 - 协议：每次改代码前读 `collab/state.json` 领 `collab/locks.json` 文件锁，改完写 `collab/inbox/<对方>/` 交接单。
 - 对方用 GitHub MCP：任务走 Issue、代码走 PR、交接走评论；不需要自建中继，见 [`collab/agent-guide.md`](collab/agent-guide.md)。
-- 规则：共享文件（`index.html`、`js/game.js`、`js/main.js` 等）必须领锁；小步提交、先 rebase 再 PR。
+- 规则：共享文件（`index.html`、`js/game.js`、`js/main.js`、`js/core/` 等）必须领锁；小步提交、先 rebase 再 PR。
 - 完整流程见 [`collab/README.md`](collab/README.md)。
 
 ### 分辨率与触屏

@@ -4,13 +4,17 @@
   "main": "origin/main",
   "activeTask": null,
   "owners": {
-    "trae": "js/render/, js/dev/, css/, assets/",
-    "other": "js/game/, js/player/, js/world/, tools/"
+    "trae": "js/render/, js/dev/, css/, assets/, js/world/textures.js, js/world/lighting.js",
+    "other": "js/game/, js/player/, js/world/map.js, js/world/collision.js, js/world/lobby.js, tools/"
   },
   "sharedFiles": [
     "index.html",
     "js/game.js",
     "js/main.js",
+    "js/core/",
+    "js/ui/",
+    "js/config/",
+    "js/platform/",
     "package.json",
     "README.md",
     "collab/"
