@@ -671,7 +671,88 @@ async function main() {
       `拆包=${bombFlow.defused} 进度出现过=${bombFlow.sawProgress} 耗时 ${(bombFlow.defuseFrames / 64).toFixed(1)} s ` +
       `结果=${bombFlow.result} CT+${bombFlow.scoreCT}`);
 
-    /* 14. 渲染开销 */
+    /* 14. 加时赛 + 连败补偿（T-003 阶段 3a） */
+    const otInfo = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+
+      // --- 连败补偿：连续输 4 局，应拿到 1400 / 1900 / 2400 / 2900 ---
+      r.beginMatch(r.mode);
+      g.money = 800;
+      const gains = [];
+      for (let i = 0; i < 4; i++) {
+        const before = g.money;
+        r.end(false, 'test');
+        gains.push(g.money - before);
+        r.phase = 'freeze';       // 跳过 4 s 结算，直接进下一局
+        r.matchOver = false;
+        r.endTimer = 0;
+      }
+      const streak4 = r.lossStreak.t;
+      // 赢一局后自己的连败清零，对手连败 +1
+      r.end(true, 'test');
+      const streakWin = r.lossStreak.t;
+      const oppStreak = r.lossStreak.ct;
+
+      // --- 加时：12:12 触发，起始资金 10000，先到 4 分结束 ---
+      r.beginMatch(r.mode);
+      g.money = 800;
+      r.scoreT = 12; r.scoreCT = 11;
+      r.end(false, 'test');        // CT 赢 → 12:12
+      const ot1 = r.overtime;
+      const notOver = !r.matchOver;
+      r.update(4.1);               // 结算结束 → 加时第 1 回合 start
+      const otMoney = g.money;
+      const otPhase = r.phase;
+      r.scoreT = r.otBase.t + 4;
+      r.end(true, 'test');
+      const otFinished = r.matchOver;
+
+      // --- 加时 3:3 进入下一个加时（最多 3 个） ---
+      r.beginMatch(r.mode);
+      r.overtime = 1; r.otBase = { t: 12, ct: 12 };
+      r.scoreT = 14; r.scoreCT = 15;
+      r.end(true, 'test');         // 15:15 → 加时 3:3
+      const ot2 = r.overtime;
+      const ot2Base = r.otBase.t + ':' + r.otBase.ct;
+
+      // --- 第 3 个加时仍 3:3 → 战平收场 ---
+      r.beginMatch(r.mode);
+      r.overtime = 3; r.otBase = { t: 15, ct: 15 };
+      r.scoreT = 17; r.scoreCT = 18;
+      r.end(true, 'test');         // 18:18 → 3 个加时打满
+      const drawOver = r.matchOver && r.draw;
+
+      // 复位，别污染后面的渲染断言
+      r.beginMatch(r.mode);
+      g.money = 800;
+      g.hud.setMoney(g.money);
+
+      return { gains, streak4, streakWin, oppStreak, ot1, notOver, otMoney, otPhase,
+        otFinished, ot2, ot2Base, drawOver,
+        curve: [1, 2, 3, 4, 5, 6].map((n) => r._lossBonus(n)) };
+    `);
+    check('连败补偿按 1400/1900/2400/2900 递增',
+      JSON.stringify(otInfo.gains) === JSON.stringify([1400, 1900, 2400, 2900]) && otInfo.streak4 === 4,
+      'gains=' + JSON.stringify(otInfo.gains) + ' 连败=' + otInfo.streak4);
+    check('连败补偿第 5 局起封顶 3400',
+      otInfo.curve[4] === 3400 && otInfo.curve[5] === 3400,
+      '曲线=' + JSON.stringify(otInfo.curve));
+    check('赢一局重置连败计数',
+      otInfo.streakWin === 0 && otInfo.oppStreak === 1,
+      '自己=' + otInfo.streakWin + ' 对手=' + otInfo.oppStreak);
+    check('12:12 进入加时且发 10000',
+      otInfo.ot1 === 1 && otInfo.notOver && otInfo.otMoney === 10000 && otInfo.otPhase === 'freeze',
+      '加时=' + otInfo.ot1 + ' 起始资金=' + otInfo.otMoney + ' 阶段=' + otInfo.otPhase);
+    check('加时先到 4 分结束比赛',
+      otInfo.otFinished === true, 'matchOver=' + otInfo.otFinished);
+    check('加时 3:3 进入下一个加时',
+      otInfo.ot2 === 2 && otInfo.ot2Base === '15:15',
+      '第 ' + otInfo.ot2 + ' 个加时，基准 ' + otInfo.ot2Base);
+    check('三个加时后 3:3 判战平',
+      otInfo.drawOver === true, 'matchOver+draw=' + otInfo.drawOver);
+
+    /* 15. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));
