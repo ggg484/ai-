@@ -22,9 +22,11 @@
 1. 从最新 `main` 切任务分支。
 2. 一个任务一个分支，提交尽量小于 200 行。
 3. 推送前先 `git pull --rebase origin main`。
-4. 合并回 `main` 用 PR；PR 标题带任务号。
+4. 合并回 `main` 用 PR；PR 标题带任务号和 `[agent:<名字>]`。
 5. 禁止 force push 到 `main` 和别人的 `agent/*` 分支。
 6. 共享文件（见下）必须先领锁。
+7. `main` 受保护：必须走 PR，且 `smoke` 检查通过；不能直接 push、force push 或删除。
+8. PR 标题里带 `[agent:trae]` / `[agent:other]` 会自动打标签。
 
 提交格式：
 

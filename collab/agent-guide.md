@@ -15,8 +15,9 @@
 ## 你的分支
 
 - 从 `main` 切：`agent/<你的名字>/<task-id>-<slug>`
-- 不要直接推 `main`
+- 不要直接推 `main`（已开启分支保护）
 - 不要 force push 别人的分支
+- PR 必须通过 `smoke` 检查才能合并；PR 标题带 `[agent:<名字>]` 会自动打标签
 
 ## 标准动作
 
@@ -49,14 +50,15 @@
 
 ## 测试
 
-GitHub MCP 通常不能跑本地命令。能跑就跑：
+GitHub Actions 会在 PR / push 时自动跑 `smoke`（对局冒烟 + 大厅冒烟）。
+本地能跑就跑：
 
 ```bash
 npm run smoke
 npm run smoke:lobby
 ```
 
-跑不了就交给有执行环境的一方，或者等 CI。不要假报通过。
+跑不了就以 CI 结果为准，不要假报通过。
 
 ## 冲突
 
