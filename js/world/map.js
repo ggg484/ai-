@@ -1128,8 +1128,8 @@ export function buildMap(root, buildOpts) {
     const g = new THREE.CylinderGeometry(0.42, 0.42, 1.1, 16);
     g.translate(x, 0.55, z);
     barrelGeos.push(g);
-    prop({ x, y: 0.55, z, w: 0.84, h: 1.1, d: 0.84, kind: 'metal', tag: 'cover', collide: true });
-    world.add({ minX: x - 0.42, maxX: x + 0.42, minY: 0, maxY: 1.1, minZ: z - 0.42, maxZ: z + 0.42, tag: 'cover' });
+    prop({ x, y: 0.55, z, w: 0.84, h: 1.1, d: 0.84, kind: 'metal', tag: 'prop', collide: true });
+    world.add({ minX: x - 0.42, maxX: x + 0.42, minY: 0, maxY: 1.1, minZ: z - 0.42, maxZ: z + 0.42, tag: 'prop' });
   });
   const barrelMesh = new THREE.Mesh(mergeGeos(barrelGeos), barrelMat);
   barrelMesh.castShadow = true;
@@ -1142,22 +1142,22 @@ export function buildMap(root, buildOpts) {
   [[17, 3], [-16.8, -3], [31.8, -24], [-31.4, 25.6], [9.2, -22],
     [42, 4], [-42, 4], [8, -41], [-8, 41]].forEach(([x, z]) => {
     for (let i = 0; i < 3; i++) {
-      const g = new THREE.BoxGeometry(2.2, 0.12, 1.4);
+      const g = new THREE.BoxGeometry(2.2, 0.10, 1.4);
       g.rotateY(((i * 7) % 5 - 2) * 0.03);
-      g.translate(x, 0.06 + i * 0.14, z);
+      g.translate(x, 0.05 + i * 0.10, z);
       palletGeos.push(g);
     }
-    prop({ x, y: 0.21, z, w: 2.2, h: 0.42, d: 1.4, kind: 'wood', tag: 'cover', collide: true });
-    world.add({ minX: x - 1.1, maxX: x + 1.1, minY: 0, maxY: 0.42, minZ: z - 0.7, maxZ: z + 0.7, tag: 'cover' });
+    prop({ x, y: 0.15, z, w: 2.2, h: 0.30, d: 1.4, kind: 'wood', tag: 'prop', collide: true });
+    world.add({ minX: x - 1.1, maxX: x + 1.1, minY: 0, maxY: 0.30, minZ: z - 0.7, maxZ: z + 0.7, tag: 'prop' });
   });
   const palletMesh = new THREE.Mesh(mergeGeos(palletGeos), palletMat);
   palletMesh.castShadow = true;
   palletMesh.receiveShadow = true;
   root.add(palletMesh);
 
-  // 轮胎堆
+  // 轮胎堆（装饰道具，不当作对局掩体）
   const tireGeos = [];
-  [[30.8, 4.4], [-31.2, 3.6], [21.4, -22.2], [-22.4, -22.6]].forEach(([x, z], si) => {
+  [[33.6, 4.4], [-33.8, 3.6], [25.4, -23.0], [-26.4, -23.0]].forEach(([x, z], si) => {
     const n = si % 2 ? 3 : 4;
     for (let i = 0; i < n; i++) {
       const g = new THREE.TorusGeometry(0.34, 0.12, 8, 18);
@@ -1165,7 +1165,7 @@ export function buildMap(root, buildOpts) {
       g.translate(x, 0.13 + i * 0.24, z);
       tireGeos.push(g);
     }
-    world.add({ minX: x - 0.46, maxX: x + 0.46, minY: 0, maxY: n * 0.24, minZ: z - 0.46, maxZ: z + 0.46, tag: 'cover' });
+    world.add({ minX: x - 0.46, maxX: x + 0.46, minY: 0, maxY: n * 0.24, minZ: z - 0.46, maxZ: z + 0.46, tag: 'prop' });
   });
   const tireMesh = new THREE.Mesh(mergeGeos(tireGeos), flat(0x1a1a18, { roughness: 0.92, metalness: 0.02 }));
   tireMesh.castShadow = true;
@@ -1392,7 +1392,7 @@ export function buildMap(root, buildOpts) {
     fm.castShadow = true;
     fm.receiveShadow = true;
     root.add(fm);
-    world.add({ minX: -1.5, maxX: 1.5, minY: 0, maxY: 0.8, minZ: 40.5, maxZ: 43.5, tag: 'cover' });
+    world.add({ minX: -1.5, maxX: 1.5, minY: 0, maxY: 0.8, minZ: 40.5, maxZ: 43.5, tag: 'prop' });
     const wg = new THREE.CircleGeometry(1.25, 20);
     wg.rotateX(-Math.PI / 2);
     const wm = new THREE.Mesh(wg, new THREE.MeshBasicMaterial({ color: 0x62b7d8, transparent: true, opacity: 0.75 }));
@@ -1583,6 +1583,126 @@ export function buildMap(root, buildOpts) {
     bots: baseSpawns.bots.map((s, i) => ({ ...s, ...((editSpawns.bots && editSpawns.bots[i]) || {}) }))
   };
   const waypoints = baseWaypoints.map((w, i) => ({ ...w, ...(editWaypoints[i] || {}) }));
+
+  // 战术掩体补密：避开现有碰撞体、出生点、包点中心和 Bot 路径点。
+  // 每个点位仍走 box()，会自动获得 COVER_MIN_HEIGHT 的高度归一化。
+  const coverSpecs = [
+    // A 大 / 东线
+    { x: 24, z: -23, w: 2.2, d: 1.2, kind: 'wood' },
+    { x: 29.5, z: -18, w: 2.0, d: 1.2, kind: 'metal' },
+    { x: 24, z: -4, w: 2.4, d: 1.0, kind: 'fabric' },
+    { x: 29, z: 1, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: 19, z: 2, w: 1.2, d: 2.4, kind: 'brick' },
+    { x: 24, z: 11, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: 33, z: 7, w: 1.2, d: 1.4, kind: 'wood' },
+    { x: 21, z: -9, w: 1.8, d: 1.2, kind: 'fabric' },
+    { x: 16, z: -12, w: 1.2, d: 1.2, kind: 'wood' },
+    { x: 30, z: -12, w: 1.4, d: 2.0, kind: 'metal', h: 1.6 },
+    // B 洞 / 西线
+    { x: -28, z: -8, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: -21, z: -14, w: 1.8, d: 1.2, kind: 'fabric' },
+    { x: -18, z: -15, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -29, z: -3, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: -25, z: 2, w: 2.2, d: 1.0, kind: 'fabric' },
+    { x: -33, z: -12, w: 1.2, d: 2.2, kind: 'metal', h: 1.6 },
+    { x: -21, z: 1, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -27, z: 9, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: -18, z: -7, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -31, z: 2, w: 1.2, d: 2.0, kind: 'metal' },
+    // 中路
+    { x: -6, z: -14, w: 1.8, d: 1.2, kind: 'wood' },
+    { x: 6, z: -9, w: 1.2, d: 2.0, kind: 'fabric' },
+    { x: -7, z: 1, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 7, z: 12, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: -7, z: 14, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 2, z: -18, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -6, z: 21, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: 6, z: 21, w: 1.6, d: 1.2, kind: 'wood' },
+    // T 出生区
+    { x: -8, z: -30.5, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: 6, z: -30, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: -3, z: -27, w: 1.4, d: 1.4, kind: 'fabric' },
+    { x: 14, z: -28, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -17, z: -29, w: 1.6, d: 1.2, kind: 'metal' },
+    { x: 18, z: -30.5, w: 1.2, d: 2.0, kind: 'fabric' },
+    // CT 出生区
+    { x: -7, z: 32, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: 7, z: 31, w: 1.6, d: 1.6, kind: 'fabric' },
+    { x: -22, z: 33, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: 22, z: 33, w: 2.0, d: 1.2, kind: 'wood' },
+    { x: -2, z: 36, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 2, z: 30, w: 1.2, d: 1.2, kind: 'wood' },
+    // A 东院 / B 西院
+    { x: 40, z: 4, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: 47, z: 9, w: 2.0, d: 1.2, kind: 'metal' },
+    { x: 38, z: 22, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 46, z: 22, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: 43, z: 0, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: -40, z: 4, w: 1.6, d: 1.6, kind: 'wood' },
+    { x: -47, z: 9, w: 2.0, d: 1.2, kind: 'metal' },
+    { x: -38, z: 22, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -46, z: 22, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: -43, z: 0, w: 1.2, d: 2.0, kind: 'metal' },
+    // A/B 后巷
+    { x: 20, z: 29.5, w: 1.6, d: 1.2, kind: 'wood' },
+    { x: 28, z: 29.5, w: 1.4, d: 1.4, kind: 'fabric' },
+    { x: -20, z: 29.5, w: 1.6, d: 1.2, kind: 'wood' },
+    { x: -28, z: 29.5, w: 1.4, d: 1.4, kind: 'fabric' },
+    { x: 25, z: 34, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -25, z: 34, w: 1.2, d: 1.2, kind: 'brick' },
+    // 第二批：补足开阔地带的交火掩体
+    { x: 22, z: -22, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 18, z: -24, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 23, z: 4, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: 28, z: -2, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: 32, z: -5, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 26, z: -8, w: 1.4, d: 1.2, kind: 'wood' },
+    { x: -19, z: -20, w: 1.6, d: 1.2, kind: 'wood' },
+    { x: -24, z: -5, w: 1.8, d: 1.2, kind: 'fabric' },
+    { x: -28, z: 5, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -30, z: 12, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: -19, z: 9, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -2, z: 12, w: 1.4, d: 1.2, kind: 'wood' },
+    { x: 2, z: 4, w: 1.2, d: 1.4, kind: 'fabric' },
+    { x: 0, z: -10, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -12, z: -29, w: 1.6, d: 1.2, kind: 'wood' },
+    { x: 11, z: -31, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 2, z: -33, w: 1.4, d: 1.4, kind: 'fabric' },
+    { x: -6, z: -35, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: -12, z: 31, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 12, z: 30, w: 1.4, d: 1.4, kind: 'fabric' },
+    { x: -17, z: 31, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 17, z: 31, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 36, z: 10, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: 42, z: 8, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: 49, z: 4, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: 40, z: 26, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: 46, z: 28, w: 1.2, d: 1.4, kind: 'wood' },
+    { x: -36, z: 10, w: 1.4, d: 1.4, kind: 'wood' },
+    { x: -42, z: 8, w: 1.2, d: 2.0, kind: 'metal' },
+    { x: -49, z: 4, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -40, z: 26, w: 1.6, d: 1.2, kind: 'fabric' },
+    { x: -46, z: 28, w: 1.2, d: 1.4, kind: 'wood' },
+    { x: 24, z: 30.5, w: 1.2, d: 1.4, kind: 'wood' },
+    { x: 18, z: 30.5, w: 1.2, d: 1.2, kind: 'brick' },
+    { x: -24, z: 30.5, w: 1.2, d: 1.4, kind: 'wood' },
+    { x: -18, z: 30.5, w: 1.2, d: 1.2, kind: 'brick' }
+  ];
+  let coversAdded = 0;
+  const nearSpawn = (x, z) => [...spawns.allies, ...spawns.bots, spawns.player]
+    .some((s) => Math.hypot(s.x - x, s.z - z) < 3.2);
+  const nearSite = (x, z) => [SITE_A, SITE_B, SITE_A_NEW, SITE_B_NEW]
+    .some((s) => Math.hypot(s.x - x, s.z - z) < 2.8);
+  for (const c of coverSpecs) {
+    const h = c.h || COVER_MIN_HEIGHT;
+    if (world.overlaps(c.x - c.w / 2 - 0.55, 0, c.z - c.d / 2 - 0.55,
+      c.x + c.w / 2 + 0.55, h + 0.2, c.z + c.d / 2 + 0.55)) continue;
+    if (nearSpawn(c.x, c.z) || nearSite(c.x, c.z)) continue;
+    if (waypoints.some((w) => Math.hypot(w.x - c.x, w.z - c.z) < 1.8)) continue;
+    box(c.x, h / 2, c.z, c.w, h, c.d, c.kind, { tag: 'cover' });
+    coversAdded++;
+  }
+
   const buyZone = {
     minX: spawns.player.x - 10, maxX: spawns.player.x + 10,
     minZ: spawns.player.z - 5.5, maxZ: spawns.player.z + 5.5
@@ -1599,6 +1719,7 @@ export function buildMap(root, buildOpts) {
     buyZone,
     bounds: { minX: -53, maxX: 53, minZ: -45, maxZ: 45 },
     waypoints,
+    coversAdded,
     callouts: {
       tSpawn: { x: spawns.player.x, z: spawns.player.z },
       ctSpawn: { x: 0, z: 38 },
