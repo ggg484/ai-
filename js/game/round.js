@@ -5,7 +5,7 @@
 
 import * as THREE from '../../vendor/three.module.js';
 import { audio } from '../core/audio.js';
-import { ECONOMY } from '../config/weapons.js';
+import { ECONOMY, WEAPONS, BUY_ITEMS } from '../config/weapons.js';
 import { MODE_MAP } from '../config/modes.js';
 
 export const PHASE = { FREEZE: 'freeze', LIVE: 'live', PLANTED: 'planted', ENDED: 'ended' };
@@ -20,6 +20,13 @@ export const LOSS_BONUS_MAX = 5;
 
 // 拆包奖励：ECONOMY 里没有该项，按 CS 惯例固定 300。
 const DEFUSE_REWARD = 300;
+
+// T-009 阶段 2：Bot 购买。价格只读 config，不在回合层硬编码数值。
+const AK_PRICE = (WEAPONS.ak && WEAPONS.ak.price) || 2700;
+const ARMOR_ITEM = BUY_ITEMS.find((i) => i.id === 'armor');
+const ARMOR_PRICE = ARMOR_ITEM ? ARMOR_ITEM.price : 650;
+// 低于这条线只存钱，不买甲：保证 eco 局能攒到下回合起长枪
+const BUY_SAVE_LINE = 2000;
 
 export class Round {
   constructor(game) {
@@ -87,6 +94,9 @@ export class Round {
     this._killSnapshot.clear();
     for (const b of (this.game.bots || [])) {
       b.money = Math.min(ECONOMY.cap, money);
+      // 比赛开始 / 半场换边：装备清零，从手枪局重新开始
+      b.weaponId = 'glock';
+      b.armor = 0;
       this._killSnapshot.set(b, b.kills || 0);
     }
     this.economyLog = [];
@@ -122,6 +132,7 @@ export class Round {
       : g.map.spawns.player;
     g.player.reset(g.player.respawnPoint);
     g.bots.forEach((b) => b.reset());
+    this._botBuyPhase();
     g.hud.setPhase(this.overtime > 0
       ? `加时赛 ${this.overtime}`
       : (this.swapCount > 0 ? '下半场 · 购买时间' : '购买时间'));
@@ -464,6 +475,34 @@ export class Round {
       const botWin = b.team === 't' ? tWin : !tWin;
       if (botWin) this._addBotMoney(b, ECONOMY.win, 'round-win');
       else this._addBotMoney(b, this._lossBonus(this.lossStreak[b.team]), 'round-loss');
+    }
+  }
+
+  /**
+   * T-009 阶段 2：冻结时间的 Bot 购买。
+   * 规则刻意简单、可核对：
+   * - 钱 < 2000 且没有长枪：eco 存钱，继续用手枪
+   * - 钱够 AK：买 AK
+   * - 还有余钱且没甲：补甲
+   * 钱不够不会硬买，_addBotMoney 也不会让余额变成负数。
+   */
+  _botBuyPhase() {
+    const g = this.game;
+    for (const b of (g.bots || [])) {
+      if (!b.alive) continue;
+      let money = b.money || 0;
+      if (b.weaponId !== 'ak') {
+        if (money < BUY_SAVE_LINE) continue;      // eco：存钱
+        if (money >= AK_PRICE) {
+          this._addBotMoney(b, -AK_PRICE, 'buy-ak');
+          b.weaponId = 'ak';
+          money = b.money;
+        }
+      }
+      if (b.armor <= 0 && money >= ARMOR_PRICE) {
+        this._addBotMoney(b, -ARMOR_PRICE, 'buy-armor');
+        b.armor = 100;
+      }
     }
   }
 

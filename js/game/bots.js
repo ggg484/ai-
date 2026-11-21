@@ -8,6 +8,7 @@ import { audio } from '../core/audio.js';
 import { buildHumanoid, animateHumanoid } from '../render/character.js';
 import { createAvatar, animateAvatar } from '../render/avatar-glb.js';
 import { applyFaction, factionOf } from '../render/unit-faction.js';
+import { WEAPONS } from '../config/weapons.js';
 import { mergeGeos } from '../world/geo-utils.js';
 import { normalizeCharRig, DEFAULT_CHAR_RIG } from '../render/rig.js';
 
@@ -437,6 +438,9 @@ export class Bot {
     this.deaths = 0;
     // T-009：Bot 独立经济。回合之间保留，比赛开始 / 半场由 round.js 重置。
     this.money = 0;
+    // T-009 阶段 2：武器与护甲。购买由 round.js 在冻结时间统一执行。
+    this.weaponId = 'glock';
+    this.armor = 0;
 
     this.group = new THREE.Group();
     this.group.name = this.id;
@@ -574,6 +578,9 @@ export class Bot {
   }
 
   reset() {
+    // 上回合阵亡则掉枪；护甲不跨回合，购买阶段重新买
+    if (!this.alive) this.weaponId = 'glock';
+    this.armor = 0;
     this.objective = null;
     this.holding = false;
     this.pos.set(this.spawn.x, 0, this.spawn.z);
@@ -724,7 +731,7 @@ export class Bot {
       } else {
         this.shootCd -= dt;
         if (this.shootCd <= 0 && this.reaction > 0.35) {
-          this.shootCd = (this.crouch ? 1.35 : 1.05) + Math.random() * 0.55;
+          this.shootCd = this._shotDelay();
           this.muzzleT = 0.06;
           this.shootAnim = 1;
           this.flash.visible = true;
@@ -908,8 +915,22 @@ export class Bot {
     this.weaponMount.quaternion.copy(this._qTilt);
   }
 
+  /** 一次开火的间隔：以 glock 400 rpm 为基准，步枪更快；蹲下更稳。 */
+  _shotDelay() {
+    const w = WEAPONS[this.weaponId] || WEAPONS.glock;
+    const rate = 420 / Math.max(120, w.rpm || 400);
+    return ((this.crouch ? 1.35 : 1.05) + Math.random() * 0.55) * rate;
+  }
+
+  /** 当前武器在给定距离上的散布，越小越准（smoke 用它验证武器差异）。 */
+  _spreadAt(dist) {
+    const w = WEAPONS[this.weaponId] || WEAPONS.glock;
+    return (w.spread || 0.012) + dist * 0.0011;
+  }
+
   _rollShot(eye, pe, dist, isPlayer) {
-    const spread = 0.012 + dist * 0.0011;
+    const w = WEAPONS[this.weaponId] || WEAPONS.glock;
+    const spread = this._spreadAt(dist);
     const dir = new THREE.Vector3(pe.x - eye.x, pe.y - eye.y, pe.z - eye.z).normalize();
     const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
     const up = new THREE.Vector3().crossVectors(right, dir).normalize();
@@ -921,7 +942,9 @@ export class Bot {
     const t1 = raySphere(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, chest.x, chest.y, chest.z, 0.34);
     const t2 = raySphere(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, pe.x, pe.y - 0.55, pe.z, 0.34);
     const t = (t1 >= 0 && (t2 < 0 || t1 < t2)) ? t1 : t2;
-    const head = Math.random() < (isPlayer ? 0.05 : 0.08);
+    // 步枪更准，爆头率略高；保持同一量级，避免变成数值游戏
+    const hsBase = isPlayer ? 0.05 : 0.08;
+    const head = Math.random() < hsBase * (w.spread <= 0.008 ? 1.35 : 1);
     const hit = t >= 0 && t < dist + 1.2;
     return { hit: hit, head: hit && head, dist: dist, dir: dir, origin: eye.clone() };
   }
@@ -943,7 +966,13 @@ export class Bot {
 
   damage(amount, head) {
     if (!this.alive) return false;
-    this.hp -= amount * (head ? 4 : 1);
+    let dmg = amount * (head ? 4 : 1);
+    // 护甲吸收 50%，同时按原始伤害的一半消耗护甲（与玩家一致）
+    if (this.armor > 0) {
+      dmg *= 0.5;
+      this.armor = Math.max(0, this.armor - amount * 0.5);
+    }
+    this.hp -= dmg;
     this.hitT = 0.28;
     if (this.hp <= 0) {
       this.hp = 0;
