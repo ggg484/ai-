@@ -15,7 +15,7 @@ import { startServer } from '../scripts/serve.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const ROUND = process.env.ROUND || 'r0';
-const OUT = process.env.SHOT_DIR || join('/workspace/screenshots', 'round-' + ROUND);
+const OUT = process.env.SHOT_DIR || join(ROOT, 'screenshots', 'round-' + ROUND);
 const CHROME = process.env.CHROME_PATH || '/root/.cache/puppeteer/chrome-headless-shell/linux-155.0.8059.39/chrome-headless-shell-linux64/chrome-headless-shell';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

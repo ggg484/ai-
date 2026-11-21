@@ -11,7 +11,7 @@ import { startServer } from '../scripts/serve.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
-const OUT = process.env.SHOT_DIR || '/workspace/screenshots';
+const OUT = process.env.SHOT_DIR || join(ROOT, 'screenshots');
 const CHROME = process.env.CHROME_PATH || '/root/.cache/puppeteer/chrome/linux-155.0.8059.39/chrome-linux64/chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

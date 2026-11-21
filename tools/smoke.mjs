@@ -8,7 +8,7 @@
 //   npm run smoke -- --no-xvfb      # 不自动套 xvfb（自己已有 DISPLAY 时）
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -16,6 +16,7 @@ import { startServer } from '../scripts/serve.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
+const SHOT_DIR = process.env.SHOT_DIR || join(ROOT, 'screenshots');
 const ARGS = process.argv.slice(2);
 const VERBOSE = ARGS.includes('--verbose');
 
@@ -282,8 +283,10 @@ async function main() {
         ' dpr=' + thLast.dpr + ' detail=' + thLast.detail + ' far=' + thLast.far);
 
       const lobbyShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync('/workspace/lobby-perf.png', Buffer.from(lobbyShot.data, 'base64'));
-      console.log('[lobby] screenshot=/workspace/lobby-perf.png');
+      mkdirSync(SHOT_DIR, { recursive: true });
+      const lobbyPath = join(SHOT_DIR, 'lobby-perf.png');
+      writeFileSync(lobbyPath, Buffer.from(lobbyShot.data, 'base64'));
+      console.log('[lobby] screenshot=' + lobbyPath);
 
       // 皮肤品相：打开面板，换一个磨损/图案，再装备
       await cdp.eval("window.__game.lobbyUi.showSkins('ak', 'ak_redline'); 1").catch(() => null);
@@ -298,8 +301,9 @@ async function main() {
       const applied = await cdp.eval('const v = window.__game.viewmodel.skins.ak; return v && v.variant ? v.variant : null').catch(() => null);
       check('品相写入视角模型', !!applied && Math.abs(applied.wear - 0.412) < 0.001, applied ? JSON.stringify(applied) : 'null');
       const skinShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync('/workspace/lobby-skins.png', Buffer.from(skinShot.data, 'base64'));
-      console.log('[lobby] skins screenshot=/workspace/lobby-skins.png');
+      const skinPath = join(SHOT_DIR, 'lobby-skins.png');
+      writeFileSync(skinPath, Buffer.from(skinShot.data, 'base64'));
+      console.log('[lobby] skins screenshot=' + skinPath);
 
       // 快速传送：关掉面板，点「二层看台」
       await cdp.eval("window.__game.lobbyUi.closePanels(); 1").catch(() => null);
@@ -310,8 +314,9 @@ async function main() {
       const panelOpen = await cdp.eval('return !!(window.__game.lobbyUi && window.__game.lobbyUi.panel)').catch(() => true);
       check('快速传送到二层看台', !!tp && tp.y > 5 && tp.z < -18 && !panelOpen, (tp ? JSON.stringify(tp) : 'null') + ' panel=' + panelOpen);
       const mezzShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync('/workspace/lobby-mezz.png', Buffer.from(mezzShot.data, 'base64'));
-      console.log('[lobby] mezz screenshot=/workspace/lobby-mezz.png');
+      const mezzPath = join(SHOT_DIR, 'lobby-mezz.png');
+      writeFileSync(mezzPath, Buffer.from(mezzShot.data, 'base64'));
+      console.log('[lobby] mezz screenshot=' + mezzPath);
 
       // 3D 检视：AWP 与 C4
       await cdp.eval("window.__game.openPhoto('weapon','awp'); 1").catch(() => null);
@@ -319,15 +324,17 @@ async function main() {
       const photo = await cdp.eval("return { active: window.__game.photoActive, title: document.getElementById('photo-title').textContent, nav: document.querySelectorAll('#photo-nav button').length }").catch(() => null);
       check('3D 检视模式', !!photo && photo.active && photo.title.indexOf('AWP') >= 0 && photo.nav >= 12, photo ? JSON.stringify(photo) : 'null');
       const photoShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync('/workspace/photo-awp.png', Buffer.from(photoShot.data, 'base64'));
-      console.log('[lobby] photo screenshot=/workspace/photo-awp.png');
+      const photoPath = join(SHOT_DIR, 'photo-awp.png');
+      writeFileSync(photoPath, Buffer.from(photoShot.data, 'base64'));
+      console.log('[lobby] photo screenshot=' + photoPath);
       await cdp.eval("window.__game.photo.show('prop','c4'); 1").catch(() => null);
       await sleep(900);
       const propPhoto = await cdp.eval("return document.getElementById('photo-title').textContent").catch(() => '');
       check('道具检视模式', propPhoto.indexOf('C4') >= 0 || propPhoto.indexOf('炸弹') >= 0, propPhoto);
       const propShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync('/workspace/photo-c4.png', Buffer.from(propShot.data, 'base64'));
-      console.log('[lobby] prop screenshot=/workspace/photo-c4.png');
+      const propPath = join(SHOT_DIR, 'photo-c4.png');
+      writeFileSync(propPath, Buffer.from(propShot.data, 'base64'));
+      console.log('[lobby] prop screenshot=' + propPath);
       await cdp.eval("window.__game.closePhoto(); 1").catch(() => null);
 
       const errs = cdp.logs.filter((l) => l.indexOf('[exception]') === 0);
