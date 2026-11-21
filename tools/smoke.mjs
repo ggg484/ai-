@@ -481,7 +481,134 @@ async function main() {
     check('进入第 2 回合', next.round === 2 && next.phase === 'freeze', 'round=' + next.round + ' phase=' + next.phase);
     check('回合重置补满状态', next.hp === 100 && next.ammo > 0, 'hp=' + next.hp + ' ammo=' + next.ammo);
 
-    /* 10. 渲染开销 */
+    /* 10. 导航网格 + A*（T-003 阶段 1） */
+    const navInfo = await cdp.eval(`
+      const g = window.__game;
+      const nav = g.bots[0].nav;
+      const s = nav.stats();
+      return Object.assign(s, { shared: g.bots.every((b) => b.nav === nav) });
+    `);
+    check('导航网格已构建', navInfo.cells > 5000 && navInfo.free > navInfo.cells * 0.35 && navInfo.step === 0.75,
+      navInfo.w + '×' + navInfo.h + ' 格 / 可走 ' + navInfo.free + ' / 9 Bot 共用 ' + navInfo.shared);
+
+    const navPaths = await cdp.eval(`
+      const g = window.__game;
+      const nav = g.bots[0].nav;
+      const A = g.map.sites.A, B = g.map.sites.B;
+      const sample = (pts) => {
+        let bad = 0, n = 0;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], b = pts[i + 1];
+          const k = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.3));
+          for (let s = 1; s <= k; s++) {
+            n++;
+            if (!nav.isFree(a.x + (b.x - a.x) * s / k, a.z + (b.z - a.z) * s / k)) bad++;
+          }
+        }
+        return { n, bad };
+      };
+      const t = nav.path(0, -38, A.x, A.z);
+      const ct = nav.path(0, 38, B.x, B.z);
+      return {
+        t: t ? t.length : 0, ct: ct ? ct.length : 0,
+        sample: (t ? sample(t) : { n: 0, bad: 999 }).bad + (ct ? sample(ct) : { n: 0, bad: 999 }).bad,
+        n: (t ? sample(t) : { n: 0 }).n + (ct ? sample(ct) : { n: 0 }).n
+      };
+    `);
+    check('A* 连得通 T→A / CT→B', navPaths.t >= 2 && navPaths.ct >= 2,
+      'T→A ' + navPaths.t + ' 点 / CT→B ' + navPaths.ct + ' 点');
+    check('路径全程不穿墙', navPaths.sample === 0,
+      '采样 ' + navPaths.n + ' 点，越界 ' + navPaths.sample);
+
+    /* 11. Bot 实走：CT 出生点 → A 点，T 出生点 → B 点（不穿墙、限时到达） */
+    const walkTo = (botExpr, siteKey) => `
+      const g = window.__game;
+      const b = ${botExpr};
+      b.reset();
+      const site = g.map.sites.${siteKey};
+      const from = { x: +b.pos.x.toFixed(1), z: +b.pos.z.toFixed(1) };
+      const goals = [{ x: site.x, z: site.z }];
+      const ctx = { player: { alive: false }, tBots: [], ctBots: [] };
+      const cb = { onBotShoot() {}, onBotReload() {} };
+      let t = 0, inside = 0, minD = 1e9;
+      for (let i = 0; i < 64 * 45; i++) {
+        b.update(1 / 64, ctx, goals, cb);
+        t += 1 / 64;
+        const d = Math.hypot(b.pos.x - site.x, b.pos.z - site.z);
+        if (d < minD) minD = d;
+        if (b.world.overlaps(b.pos.x - 0.24, b.pos.y + 0.2, b.pos.z - 0.24,
+                             b.pos.x + 0.24, b.pos.y + 1.3, b.pos.z + 0.24)) inside++;
+        if (d < 5) break;
+      }
+      b.reset();
+      return { from, t: +t.toFixed(1), minD: +minD.toFixed(1), inside };
+    `;
+
+    const walkA = await cdp.eval(walkTo('g.enemyBots[0]', 'A'));
+    check('CT Bot 走到 A 点', walkA.minD < 5.5 && walkA.inside === 0,
+      `(${walkA.from.x}, ${walkA.from.z}) → A，${walkA.t} s，最近 ${walkA.minD} m，嵌墙 ${walkA.inside} 帧`);
+
+    const walkB = await cdp.eval(walkTo('g.allyBots[0]', 'B'));
+    check('T Bot 走到 B 点', walkB.minD < 5.5 && walkB.inside === 0,
+      `(${walkB.from.x}, ${walkB.from.z}) → B，${walkB.t} s，最近 ${walkB.minD} m，嵌墙 ${walkB.inside} 帧`);
+
+    /* 12. 门口通行：合成地图上 2.4 m 门洞，必须从门洞中间穿过 */
+    const door = await cdp.eval(`
+      const m = await import('/js/game/bots.js');
+      const boxes = [
+        { minX: -0.4, maxX: 0.4, minY: 0, maxY: 3, minZ: -12, maxZ: -1.2 },
+        { minX: -0.4, maxX: 0.4, minY: 0, maxY: 3, minZ: 1.2, maxZ: 12 },
+        { minX: -30, maxX: 30, minY: -1, maxY: 0, minZ: -30, maxZ: 30 }
+      ];
+      const nav = new m.NavGrid({ boxes });
+      const p = nav.path(-6, 0, 6, 0);
+      if (!p) return { ok: false, crossZ: null, pts: 0 };
+      let crossZ = null;
+      for (let i = 0; i < p.length - 1; i++) {
+        const a = p[i], c = p[i + 1];
+        if ((a.x < 0) !== (c.x < 0)) crossZ = a.z + (c.z - a.z) * (0 - a.x) / (c.x - a.x);
+      }
+      return { ok: true, pts: p.length, crossZ: crossZ == null ? null : +crossZ.toFixed(2) };
+    `);
+    check('门口通行（2.4 m 门洞）', door.ok && door.crossZ != null && Math.abs(door.crossZ) < 1.2,
+      door.ok ? ('路径 ' + door.pts + ' 点，穿门 z=' + door.crossZ) : '不可达');
+
+    /* 13. 卡住恢复：撞死墙后必须在 2 s 内换航点，且不能穿墙 */
+    const stuck = await cdp.eval(`
+      const g = window.__game;
+      const Bot = g.bots[0].constructor;
+      const stub = { add() {}, remove() {} };
+      const world = {
+        boxes: [{ minX: -6, maxX: 6, minY: 0, maxY: 3, minZ: 1.2, maxZ: 2.2 }],
+        move(pos, vel, dt, radius) {
+          const hit = (x, z) => x > -6 - radius && x < 6 + radius && z > 1.2 - radius && z < 2.2 + radius;
+          const nx = pos.x + vel.x * dt;
+          const nz = pos.z + vel.z * dt;
+          if (!hit(pos.x, nz)) pos.z = nz; else vel.z = 0;
+          if (!hit(nx, pos.z)) pos.x = nx; else vel.x = 0;
+          return true;
+        },
+        lineOfSight() { return false; }
+      };
+      const b = new Bot(stub, { x: 0, z: 0 }, world, { team: 'ct' });
+      const goals = [{ x: 0, z: 6 }, { x: 0, z: -4 }];
+      b.waypoint = 0;
+      const ctx = { player: { alive: false }, tBots: [], ctBots: [] };
+      const cb = { onBotShoot() {}, onBotReload() {} };
+      let recover = -1, maxStuck = 0, zMax = -1e9;
+      for (let i = 0; i < 64 * 3; i++) {
+        b.update(1 / 64, ctx, goals, cb);
+        zMax = Math.max(zMax, b.pos.z);
+        if (b.waypoint > 0) { if (recover < 0) recover = i / 64; }
+        else maxStuck = Math.max(maxStuck, b.stuck);
+      }
+      return { recover: +recover.toFixed(2), maxStuck: +maxStuck.toFixed(2), zMax: +zMax.toFixed(2) };
+    `);
+    check('卡住 2 s 内换航点且不穿墙',
+      stuck.recover > 0 && stuck.maxStuck > 0.4 && stuck.maxStuck < 2.0 && stuck.zMax < 1.0,
+      '卡住 ' + stuck.maxStuck + ' s 后恢复（总 ' + stuck.recover + ' s），最远 z=' + stuck.zMax);
+
+    /* 14. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));
