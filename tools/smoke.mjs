@@ -843,7 +843,98 @@ async function main() {
       botEco.logLen + ' 条 / 类型=' + JSON.stringify(botEco.reasons));
     check('比赛开始重置 Bot 经济', botEco.afterReset === true, '全部回到 ' + botEco.startMoney);
 
-    /* 16. 渲染开销 */
+    /* 16. 半场交换（T-003 阶段 3b） */
+    const swapInfo = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+      const A = g.map.sites.A;
+
+      // 常规赛第 12 局结束（7:5）→ 排队换边，下一回合生效
+      r.beginMatch(r.mode);
+      r.scoreT = 6; r.scoreCT = 5; r.round = 12;
+      const sideBefore = r.playerSide;
+      r.end(true, 'test');
+      const pending = r._swapPending;
+      const sideAtEnd = r.playerSide;            // 结算时还没换
+      const scoreKeep = [r.scoreT, r.scoreCT];
+
+      r.update(4.1);                             // 进入下半场
+      const sideAfter = r.playerSide;
+      const ctSpawn = [g.map.spawns.playerCT.x, g.map.spawns.playerCT.z];
+      const pos = [g.player.position.x, g.player.position.z];
+      const atCTSpawn = Math.hypot(pos[0] - ctSpawn[0], pos[1] - ctSpawn[1]) < 0.5;
+      const moneyReset = g.money === (r.mode.startMoney || 800);
+      const botMoneyReset = g.bots.every((b) => b.money === (r.mode.startMoney || 800));
+      const scoreStill = r.scoreT === scoreKeep[0] && r.scoreCT === scoreKeep[1];
+
+      // 阵容与视角：tBots/ctBots 按阵营稳定，allyBots/enemyBots 按玩家视角翻转
+      const tAll = g.tBots.every((b) => b.team === 't');
+      const ctAll = g.ctBots.every((b) => b.team === 'ct');
+      const allyCT = g.allyBots.every((b) => b.team === 'ct');
+      const enemyT = g.enemyBots.every((b) => b.team === 't');
+
+      // 换边后：下包必须指派给 T 方，拆包给 CT 方
+      r.phase = 'live'; r.timer = 100; r._plantSite = 'A';
+      r._assignBotObjectives('live');
+      const planterTeam = r._planter ? r._planter.team : null;
+      r.phase = 'planted';
+      r.bomb = { x: A.x, z: A.z, site: 'A' };
+      r._assignBotObjectives('planted');
+      const defuserTeam = r._defuser ? r._defuser.team : null;
+      r.phase = 'freeze';
+
+      // 玩家是 CT 时按住使用键也不能下包
+      const prevIsDown = g.input.isDown;
+      g.input.isDown = () => true;
+      g.player.alive = true; g.player.position.set(A.x, 0, A.z);
+      r.plantProgress = 0;
+      r._plantLogic(0.5);
+      const ctCannotPlant = r.plantProgress === 0;
+      g.input.isDown = prevIsDown;
+
+      // 加时：每 3 局换边
+      r.beginMatch(r.mode);
+      r.overtime = 1; r.otBase = { t: 12, ct: 12 };
+      r.scoreT = 12; r.scoreCT = 12; r.round = 25; r._otRoundCount = 0;
+      for (let i = 0; i < 3; i++) {
+        r.phase = 'live';
+        r.end(true, 'test');
+        if (!r.matchOver) r.phase = 'freeze';
+      }
+      const otPending = r._swapPending;
+      const otScore = [r.scoreT, r.scoreCT];
+
+      // 复位
+      r.beginMatch(r.mode);
+      g.money = 800;
+      g.hud.setMoney(g.money);
+
+      return { sideBefore, pending, sideAtEnd, sideAfter, atCTSpawn, moneyReset,
+        botMoneyReset, scoreStill, tAll, ctAll, allyCT, enemyT,
+        planterTeam, defuserTeam, ctCannotPlant, otPending, otScore };
+    `);
+    check('第 12 局结束排队换边',
+      swapInfo.sideBefore === 't' && swapInfo.pending && swapInfo.sideAtEnd === 't',
+      '结算前=' + swapInfo.sideBefore + ' 排队=' + swapInfo.pending + ' 结算时=' + swapInfo.sideAtEnd);
+    check('下半场玩家切到 CT 并换出生点',
+      swapInfo.sideAfter === 'ct' && swapInfo.atCTSpawn,
+      '阵营=' + swapInfo.sideAfter + ' 在 CT 出生点=' + swapInfo.atCTSpawn);
+    check('换边后阵容与视角正确',
+      swapInfo.tAll && swapInfo.ctAll && swapInfo.allyCT && swapInfo.enemyT,
+      'tBots=T ' + swapInfo.tAll + ' / ctBots=CT ' + swapInfo.ctAll +
+      ' / 队友=CT ' + swapInfo.allyCT + ' / 敌人=T ' + swapInfo.enemyT);
+    check('换边保留比分并重置经济',
+      swapInfo.scoreStill && swapInfo.moneyReset && swapInfo.botMoneyReset,
+      '比分保留=' + swapInfo.scoreStill + ' 玩家钱=' + swapInfo.moneyReset + ' Bot 钱=' + swapInfo.botMoneyReset);
+    check('换边后下包归 T / 拆包归 CT',
+      swapInfo.planterTeam === 't' && swapInfo.defuserTeam === 'ct',
+      '下包=' + swapInfo.planterTeam + ' 拆包=' + swapInfo.defuserTeam);
+    check('CT 玩家不能下包', swapInfo.ctCannotPlant === true, '进度未推进=' + swapInfo.ctCannotPlant);
+    check('加时每 3 局换边',
+      swapInfo.otPending === true && swapInfo.otScore[0] === 15 && swapInfo.otScore[1] === 12,
+      '排队=' + swapInfo.otPending + ' 比分=' + swapInfo.otScore.join(':'));
+
+    /* 17. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));

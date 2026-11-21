@@ -55,6 +55,10 @@ export class Round {
     // T-009：Bot 经济日志与击杀计数快照（每帧对比增量发钱，不改 game.js）
     this.economyLog = [];
     this._killSnapshot = new Map();
+    // 3b：半场交换。换边动作推迟到下一回合 start()，避免在结算里重建 Bot
+    this._swapPending = false;
+    this._otRoundCount = 0;
+    this.swapCount = 0;
   }
 
   beginMatch(mode) {
@@ -70,6 +74,9 @@ export class Round {
     this.otPending = false;
     this.draw = false;
     this.lossStreak = { t: 0, ct: 0 };
+    this._swapPending = false;
+    this._otRoundCount = 0;
+    this.swapCount = 0;
     this.resetBotEconomy();
     this.start();
   }
@@ -77,6 +84,7 @@ export class Round {
   /** 比赛开始 / 半场交换时重置 Bot 经济：全部按模式起始资金，清空日志。 */
   resetBotEconomy() {
     const money = this.mode.startMoney || ECONOMY.start;
+    this._killSnapshot.clear();
     for (const b of (this.game.bots || [])) {
       b.money = Math.min(ECONOMY.cap, money);
       this._killSnapshot.set(b, b.kills || 0);
@@ -96,6 +104,12 @@ export class Round {
     this._defuseProgress = 0;
     this.removeBomb();
 
+    // 3b：换边必须在重置玩家/Bot 之前，否则用的是旧阵营出生点
+    if (this._swapPending) {
+      this._swapPending = false;
+      this._swapSides();
+    }
+
     // 加时赛开局统一发钱（必须在 onRoundStart 之前，购买界面会读 money）
     if (this.otPending) {
       this.otPending = false;
@@ -103,13 +117,17 @@ export class Round {
     }
 
     g.roundEnding = false;
-    g.player.respawnPoint = g.map.spawns.player;
-    g.player.reset(g.map.spawns.player);
+    g.player.respawnPoint = this.playerSide === 'ct'
+      ? (g.map.spawns.playerCT || g.map.spawns.player)
+      : g.map.spawns.player;
+    g.player.reset(g.player.respawnPoint);
     g.bots.forEach((b) => b.reset());
-    g.hud.setPhase(this.overtime > 0 ? `加时赛 ${this.overtime}` : '购买时间');
+    g.hud.setPhase(this.overtime > 0
+      ? `加时赛 ${this.overtime}`
+      : (this.swapCount > 0 ? '下半场 · 购买时间' : '购买时间'));
     g.hud.setObjective(this.overtime > 0
       ? `加时赛 ${this.overtime} · 先到 ${OVERTIME.winScore} 分`
-      : '购买装备，准备进攻 A / B');
+      : (this.playerSide === 'ct' ? '购买装备，准备防守 A / B' : '购买装备，准备进攻 A / B'));
     g.hud.setBomb(false);
     g.hud.setRound(this.round);
     g.hud.setScore(this.scoreT, this.scoreCT);
@@ -151,8 +169,11 @@ export class Round {
       this._assignBotObjectives(PHASE.LIVE);
       this._plantLogic(dt);
       if (this.phase !== PHASE.LIVE) return;
-      const tAlive = (player.alive ? 1 : 0) + g.allyBots.filter((b) => b.alive).length;
-      const ctAlive = g.enemyBots.filter((b) => b.alive).length;
+      const playerOnT = (g.playerSide || this.playerSide) === 't';
+      const tBots = g.tBots || g.allyBots;
+      const ctBots = g.ctBots || g.enemyBots;
+      const tAlive = (playerOnT && player.alive ? 1 : 0) + tBots.filter((b) => b.alive).length;
+      const ctAlive = (!playerOnT && player.alive ? 1 : 0) + ctBots.filter((b) => b.alive).length;
       if (ctAlive === 0) { this.end(true, '敌人已全部消灭'); return; }
       if (tAlive === 0) { this.end(false, '我方已全部阵亡'); return; }
       if (!player.alive) {
@@ -184,8 +205,8 @@ export class Round {
     let pos = null;
     let actor = null;
 
-    // 玩家优先：站在包点按住使用键
-    if (p.alive) {
+    // 玩家优先：站在包点按住使用键（只有 T 方能下包，换边后玩家是 CT）
+    if (p.alive && (g.playerSide || this.playerSide) === 't') {
       const s = this.siteAt(p.position.x, p.position.z);
       if (s && g.input.isDown('use')) { site = s; pos = p.position; actor = p; }
     }
@@ -219,22 +240,25 @@ export class Round {
    */
   _assignBotObjectives(phase) {
     const g = this.game;
+    // 用 tBots/ctBots：换边后 allyBots 变成 CT，继续用玩家视角会指派错方向
+    const tBots = g.tBots || g.allyBots;
+    const ctBots = g.ctBots || g.enemyBots;
     if (phase === PHASE.LIVE) {
       if (!this._plantSite) this._plantSite = Math.random() < 0.5 ? 'A' : 'B';
       const s = g.map.sites[this._plantSite];
       let best = null;
       let bestD = 1e9;
-      for (const b of g.allyBots) {
+      for (const b of tBots) {
         if (!b.alive) continue;
         const d = Math.hypot(b.pos.x - s.x, b.pos.z - s.z);
         if (d < bestD) { bestD = d; best = b; }
       }
       this._planter = best;
-      for (const b of g.allyBots) {
+      for (const b of tBots) {
         if (b === best) b.objective = { type: 'plant', x: s.x, z: s.z };
         else if (b.objective && b.objective.type === 'plant') b.objective = null;
       }
-      for (const b of g.enemyBots) {
+      for (const b of ctBots) {
         if (b.objective && b.objective.type === 'defuse') b.objective = null;
       }
       return;
@@ -243,17 +267,17 @@ export class Round {
     if (phase === PHASE.PLANTED && this.bomb) {
       let best = null;
       let bestD = 1e9;
-      for (const b of g.enemyBots) {
+      for (const b of ctBots) {
         if (!b.alive) continue;
         const d = Math.hypot(b.pos.x - this.bomb.x, b.pos.z - this.bomb.z);
         if (d < bestD) { bestD = d; best = b; }
       }
       this._defuser = best;
-      for (const b of g.enemyBots) {
+      for (const b of ctBots) {
         if (b === best) b.objective = { type: 'defuse', x: this.bomb.x, z: this.bomb.z };
         else if (b.objective) b.objective = null;
       }
-      for (const b of g.allyBots) {
+      for (const b of tBots) {
         if (b.objective) b.objective = null;
         b.holding = false;
       }
@@ -382,7 +406,41 @@ export class Round {
     audio.play(playerWin ? 'win' : 'lose', { volume: 0.8 });
     g.endRound(playerWin, reason);
 
+    // 3b：先记本局是否打满半场，再判比赛结束（12:12 会进加时，仍要换边）
+    if (this.overtime > 0) this._otRoundCount++;
+    const willSwap = this._shouldSwapSides();
     this._checkMatchEnd(reason);
+    if (!this.matchOver && willSwap) this._swapPending = true;
+  }
+
+  /** 常规赛第 12 局（MR12 半场）、加时每 3 局交换阵营。 */
+  _shouldSwapSides() {
+    if (this.overtime === 0) {
+      return this.round === ((this.mode.winScore || 13) - 1);
+    }
+    return this._otRoundCount === 3;
+  }
+
+  /**
+   * 3b：半场交换。阵营重建交给 game.setPlayerSide（T-008 钩子），
+   * 回合层只负责时机、经济重置与提示。比分不重置，玩家视角由 playerSide 折算。
+   */
+  _swapSides() {
+    const g = this.game;
+    const next = this.playerSide === 't' ? 'ct' : 't';
+    if (typeof g.setPlayerSide === 'function') {
+      g.setPlayerSide(next, true);   // force：同一阵营时也要强制重建
+    }
+    this.playerSide = next;
+    this.swapCount++;
+    // 半场经济：双方回到起始资金（Bot 走统一入口）
+    this.resetBotEconomy();
+    g.money = Math.min(ECONOMY.cap, this.mode.startMoney || ECONOMY.start);
+    if (g.hud && g.hud.setMoney) g.hud.setMoney(g.money);
+    if (g.hud && g.hud.setObjective) {
+      g.hud.setObjective(next === 'ct' ? '下半场：防守 A / B' : '下半场：进攻 A / B');
+    }
+    audio.play('beep', { volume: 0.5 });
   }
 
   /** 经济：胜方固定奖励，败方按连败次数递增；赢一局立刻重置自己的连败计数。 */
@@ -500,6 +558,7 @@ export class Round {
     this.overtime++;
     this.otBase = { t: this.scoreT, ct: this.scoreCT };
     this.otPending = true;
+    this._otRoundCount = 0;
     this.endTimer = 3;
     g.hud.setPhase(`加时赛 ${this.overtime}`);
     g.hud.setObjective(`加时赛 ${this.overtime} · 先到 ${OVERTIME.winScore} 分`);
@@ -510,5 +569,7 @@ export class Round {
     const g = this.game;
     g.money = Math.min(ECONOMY.cap, OVERTIME.startMoney);
     g.hud.setMoney(g.money);
+    // T-009：Bot 同步发加时钱，避免换边后还带着常规赛经济
+    for (const b of (g.bots || [])) b.money = Math.min(ECONOMY.cap, OVERTIME.startMoney);
   }
 }
