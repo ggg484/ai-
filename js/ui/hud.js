@@ -29,6 +29,7 @@ export class Hud {
     this.rctx = this.el.radar ? this.el.radar.getContext('2d') : null;
     this.onBuy = null;
     this.onSettings = null;
+    this.playerSide = 't';
     this._vignetteT = null;
     this._endT = null;
     this._buildBuyList();
@@ -123,6 +124,11 @@ export class Hud {
     this.el.scoreCT.textContent = ct;
   }
 
+  setPlayerSide(side) {
+    this.playerSide = side === 'ct' ? 'ct' : 't';
+    this._rosterKey = '';
+  }
+
   setRound(n) { this.el.roundNo.textContent = '回合 ' + n; }
 
   setTimer(sec) {
@@ -210,11 +216,13 @@ export class Hud {
     const side = (rows, cls) => '<div class="rs-side ' + cls + '">' + rows.map((r) =>
       '<i class="' + (r.alive ? 'on' : 'off') + '" title="' + r.name + '"></i>').join('') + '</div>';
     this.el.roster.innerHTML =
-      '<span class="rs-tag t">T ' + tRows.filter((r) => r.alive).length + '</span>' +
+      '<span class="rs-tag t' + (this.playerSide === 't' ? ' you' : '') + '">T ' +
+        tRows.filter((r) => r.alive).length + '</span>' +
       side(tRows, 't') +
       '<span class="rs-vs">VS</span>' +
       side(ctRows, 'ct') +
-      '<span class="rs-tag ct">' + ctRows.filter((r) => r.alive).length + ' CT</span>';
+      '<span class="rs-tag ct' + (this.playerSide === 'ct' ? ' you' : '') + '">' +
+        ctRows.filter((r) => r.alive).length + ' CT</span>';
   }
 
   /** 按住 Tab 的战术战报。 */
@@ -235,7 +243,9 @@ export class Hud {
           '<span class="sb-st">' + (r.alive ? '●' : '✕') + '</span>' +
           '</div>').join('') + '</div>';
     };
-    this.el.sbCols.innerHTML = col('T · 进攻方', data.t, 't') + col('CT · 防守方', data.ct, 'ct');
+    this.el.sbCols.innerHTML =
+      col('T · 进攻方' + (this.playerSide === 't' ? '（我方）' : ''), data.t, 't') +
+      col('CT · 防守方' + (this.playerSide === 'ct' ? '（我方）' : ''), data.ct, 'ct');
   }
 
   drawRadar(map, player, bots, bomb) {

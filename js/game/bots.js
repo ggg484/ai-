@@ -629,11 +629,15 @@ export class Bot {
     return (out || new THREE.Vector3()).set(this.pos.x, this.pos.y + 1.55, this.pos.z);
   }
 
-  /** 选择最近的可见敌人；ctx = { player, tBots, ctBots }。 */
+  /** 选择最近的可见敌人；ctx = { player, playerTeam, tBots, ctBots }。 */
   _pickTarget(ctx) {
+    const playerTeam = ctx.playerTeam || 't';
     const list = [];
+    // 玩家只有在敌方阵营时才进入目标列表；半场交换后玩家可能是 CT。
+    if (ctx.player && ctx.player.alive && playerTeam !== this.team) {
+      list.push({ unit: ctx.player, player: true });
+    }
     if (this.team === 'ct') {
-      if (ctx.player && ctx.player.alive) list.push({ unit: ctx.player, player: true });
       for (const b of ctx.tBots || []) if (b.alive) list.push({ unit: b, player: false });
     } else {
       for (const b of ctx.ctBots || []) if (b.alive) list.push({ unit: b, player: false });

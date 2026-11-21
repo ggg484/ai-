@@ -1544,11 +1544,20 @@ export function buildMap(root, buildOpts) {
   // 基础出生点 / 导航点；编辑器可按索引覆写 x/z。
   const baseSpawns = {
     player: { x: 0, y: 0, z: -38, yaw: 0 },
+    // 半场交换后的 CT 玩家出生点：CT 北院，面朝南
+    playerCT: { x: 0, y: 0, z: 36.5, yaw: Math.PI },
     allies: [
       { x: -4, z: -36, yaw: 0, waypoint: 1 },
       { x: 4, z: -36, yaw: 0, waypoint: 2 },
       { x: -6, z: -33.6, yaw: 0, waypoint: 24 },
       { x: 6, z: -33.6, yaw: 0, waypoint: 3 }
+    ],
+    // 玩家在 CT 时，4 名 CT 队友的出生点（复用原 CT 出生区的 4 个位置）
+    ctAllies: [
+      { x: 5, z: 38, yaw: Math.PI, waypoint: 18 },
+      { x: -5, z: 38, yaw: Math.PI, waypoint: 34 },
+      { x: 38, z: 24, yaw: Math.PI, waypoint: 10 },
+      { x: -44, z: 24, yaw: Math.PI, waypoint: 27 }
     ],
     bots: [
       { x: 0, z: 38, yaw: Math.PI, waypoint: 0 },
@@ -1556,6 +1565,14 @@ export function buildMap(root, buildOpts) {
       { x: -5, z: 40, yaw: Math.PI, waypoint: 34 },
       { x: 38, z: 24, yaw: Math.PI, waypoint: 10 },
       { x: -44, z: 24, yaw: Math.PI, waypoint: 27 }
+    ],
+    // 玩家在 CT 时，5 名 T 敌人的出生点（原 T 队友 4 个 + 中路 1 个）
+    tBots: [
+      { x: -4, z: -36, yaw: 0, waypoint: 1 },
+      { x: 4, z: -36, yaw: 0, waypoint: 2 },
+      { x: -6, z: -33.6, yaw: 0, waypoint: 24 },
+      { x: 6, z: -33.6, yaw: 0, waypoint: 3 },
+      { x: 0, z: -34.5, yaw: 0, waypoint: 0 }
     ]
   };
   const baseWaypoints = [
@@ -1579,8 +1596,11 @@ export function buildMap(root, buildOpts) {
   const editWaypoints = (editData && editData.waypoints) || {};
   const spawns = {
     player: { ...baseSpawns.player, ...(editSpawns.player || {}) },
+    playerCT: { ...baseSpawns.playerCT, ...(editSpawns.playerCT || {}) },
     allies: baseSpawns.allies.map((s, i) => ({ ...s, ...((editSpawns.allies && editSpawns.allies[i]) || {}) })),
-    bots: baseSpawns.bots.map((s, i) => ({ ...s, ...((editSpawns.bots && editSpawns.bots[i]) || {}) }))
+    ctAllies: baseSpawns.ctAllies.map((s, i) => ({ ...s, ...((editSpawns.ctAllies && editSpawns.ctAllies[i]) || {}) })),
+    bots: baseSpawns.bots.map((s, i) => ({ ...s, ...((editSpawns.bots && editSpawns.bots[i]) || {}) })),
+    tBots: baseSpawns.tBots.map((s, i) => ({ ...s, ...((editSpawns.tBots && editSpawns.tBots[i]) || {}) }))
   };
   const waypoints = baseWaypoints.map((w, i) => ({ ...w, ...(editWaypoints[i] || {}) }));
 
@@ -1689,7 +1709,8 @@ export function buildMap(root, buildOpts) {
     { x: -18, z: 30.5, w: 1.2, d: 1.2, kind: 'brick' }
   ];
   let coversAdded = 0;
-  const nearSpawn = (x, z) => [...spawns.allies, ...spawns.bots, spawns.player]
+  const spawnList = [spawns.player, spawns.playerCT, ...spawns.allies, ...spawns.ctAllies, ...spawns.bots, ...spawns.tBots];
+  const nearSpawn = (x, z) => spawnList
     .some((s) => Math.hypot(s.x - x, s.z - z) < 3.2);
   const nearSite = (x, z) => [SITE_A, SITE_B, SITE_A_NEW, SITE_B_NEW]
     .some((s) => Math.hypot(s.x - x, s.z - z) < 2.8);
