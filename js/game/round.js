@@ -249,6 +249,22 @@ export class Round {
    * 阶段 2：任务点由回合系统统一指派，Bot 只负责执行。
    * 这样才能保证「同一时刻只有一个下包人 / 拆包人」，进度不会被多个 Bot 叠加。
    */
+  /**
+   * 阶段 3：按角色生成进攻站位。
+   * entry 直接压点，anchor 拖后 7 m 当第二梯队，rotator 走侧面 5 m 补枪线。
+   * 偏移以「Bot → 包点」方向为基准，换包点/换边都不用改配置。
+   */
+  _objectiveFor(bot, x, z, role, type) {
+    const ang = Math.atan2(z - bot.pos.z, x - bot.pos.x);
+    const back = role === 'anchor' ? 7 : 0;
+    const side = role === 'rotator' ? 5 : 0;
+    return {
+      type,
+      x: x - Math.cos(ang) * back + Math.cos(ang + Math.PI / 2) * side,
+      z: z - Math.sin(ang) * back + Math.sin(ang + Math.PI / 2) * side
+    };
+  }
+
   _assignBotObjectives(phase) {
     const g = this.game;
     // 用 tBots/ctBots：换边后 allyBots 变成 CT，继续用玩家视角会指派错方向
@@ -265,10 +281,26 @@ export class Round {
         if (d < bestD) { bestD = d; best = b; }
       }
       this._planter = best;
+      // T 全队 execute：一个人下包，其余按角色压点 / 拖后 / 走侧翼
       for (const b of tBots) {
-        if (b === best) b.objective = { type: 'plant', x: s.x, z: s.z };
-        else if (b.objective && b.objective.type === 'plant') b.objective = null;
+        if (!b.alive) continue;
+        if (b === best) {
+          if (!b.objective || b.objective.type !== 'plant') {
+            b.objective = { type: 'plant', x: s.x, z: s.z };
+          }
+        } else if (!b.objective || b.objective.type !== 'push') {
+          b.objective = this._objectiveFor(b, s.x, s.z, b.role, 'push');
+        }
       }
+      // CT 防守：anchor 守包点（A/B 交替），entry/rotator 保持巡逻
+      const guards = ctBots.filter((b) => b.alive && b.role === 'anchor');
+      guards.forEach((b, i) => {
+        const key = i % 2 === 0 ? this._plantSite : (this._plantSite === 'A' ? 'B' : 'A');
+        const gs = g.map.sites[key];
+        if (!b.objective || b.objective.type !== 'guard') {
+          b.objective = { type: 'guard', x: gs.x, z: gs.z };
+        }
+      });
       for (const b of ctBots) {
         if (b.objective && b.objective.type === 'defuse') b.objective = null;
       }
@@ -284,13 +316,39 @@ export class Round {
         if (d < bestD) { bestD = d; best = b; }
       }
       this._defuser = best;
-      for (const b of ctBots) {
-        if (b === best) b.objective = { type: 'defuse', x: this.bomb.x, z: this.bomb.z };
-        else if (b.objective) b.objective = null;
+      // CT 全员回防：一个人拆包，其余围绕炸弹 4~7 m 散开清场
+      for (let i = 0; i < ctBots.length; i++) {
+        const b = ctBots[i];
+        if (!b.alive) continue;
+        if (b === best) {
+          if (!b.objective || b.objective.type !== 'defuse') {
+            b.objective = { type: 'defuse', x: this.bomb.x, z: this.bomb.z };
+          }
+          continue;
+        }
+        if (!b.objective || b.objective.type !== 'retake') {
+          const ang = (i / Math.max(1, ctBots.length)) * Math.PI * 2;
+          const r = 4 + (i % 3) * 1.5;
+          b.objective = {
+            type: 'retake',
+            x: this.bomb.x + Math.cos(ang) * r,
+            z: this.bomb.z + Math.sin(ang) * r
+          };
+        }
       }
-      for (const b of tBots) {
-        if (b.objective) b.objective = null;
-        b.holding = false;
+      // T 守包：围绕炸弹 5~8 m 散开，不再原地站桩
+      for (let i = 0; i < tBots.length; i++) {
+        const b = tBots[i];
+        if (!b.alive) continue;
+        if (!b.objective || b.objective.type !== 'guard') {
+          const ang = (i / Math.max(1, tBots.length)) * Math.PI * 2;
+          const r = 5 + (i % 3) * 1.5;
+          b.objective = {
+            type: 'guard',
+            x: this.bomb.x + Math.cos(ang) * r,
+            z: this.bomb.z + Math.sin(ang) * r
+          };
+        }
       }
     }
   }

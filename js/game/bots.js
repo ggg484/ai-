@@ -866,8 +866,10 @@ export class Bot {
     const o = this.objective;
     if (!o) return out;
     const d = Math.hypot(o.x - this.pos.x, o.z - this.pos.z);
-    if (d < 0.9) {
-      this.holding = true;
+    // 下包 / 拆包要贴到 0.9 m 并站定；push / guard / retake 到 2 m 就算到位
+    const isAction = o.type === 'plant' || o.type === 'defuse';
+    if (d < (isAction ? 0.9 : 2.0)) {
+      this.holding = isAction;
       this.path.length = 0;
       this.pathI = 0;
       return out;                       // 站定，不再产生位移
