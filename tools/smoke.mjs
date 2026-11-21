@@ -608,6 +608,69 @@ async function main() {
       stuck.recover > 0 && stuck.maxStuck > 0.4 && stuck.maxStuck < 2.0 && stuck.zMax < 1.0,
       '卡住 ' + stuck.maxStuck + ' s 后恢复（总 ' + stuck.recover + ' s），最远 z=' + stuck.zMax);
 
+    /* 13. 阶段 2：角色分工 + Bot 下包 + CT Bot 拆包 */
+    const roleInfo = await cdp.eval(`
+      const g = window.__game;
+      const c = { entry: 0, anchor: 0, rotator: 0 };
+      for (const b of g.bots) c[b.role] = (c[b.role] || 0) + 1;
+      return { c, n: g.bots.length, all: g.bots.every((b) => !!b.role) };
+    `);
+    check('Bot 角色分三档', roleInfo.all && roleInfo.c.entry > 0 && roleInfo.c.anchor > 0 && roleInfo.c.rotator > 0,
+      `entry=${roleInfo.c.entry} anchor=${roleInfo.c.anchor} rotator=${roleInfo.c.rotator} / 共 ${roleInfo.n}`);
+
+    const bombFlow = await cdp.eval(`
+      const g = window.__game;
+      const A = g.map.sites.A;
+      const t = g.allyBots[0], ct = g.enemyBots[0];
+      // 只留两个 Bot，其余判死：避免中途互相清场导致回合提前结束
+      for (const b of g.bots) {
+        if (b === t || b === ct) continue;
+        b.alive = false; b.hp = 0; b.group.visible = false;
+      }
+      g.player.alive = false; g.player.hp = 0;
+      t.reset(); ct.reset();
+      t.pos.set(A.x, 0, A.z); t.group.position.copy(t.pos);
+      ct.pos.set(-6, 0, -34); ct.group.position.copy(ct.pos);
+      g.round.phase = 'live';
+      g.round.timer = 100;
+      g.round._plantSite = 'A';
+      g.round.bomb = null;
+
+      let assigned = false, planted = false, plantFrames = 0;
+      for (let i = 0; i < 64 * 20; i++) {
+        g.simulate(1 / 64);
+        plantFrames++;
+        if (g.round._planter === t) assigned = true;
+        if (g.round.phase === 'planted') { planted = true; break; }
+      }
+      const bomb = g.round.bomb ? { x: +g.round.bomb.x.toFixed(1), z: +g.round.bomb.z.toFixed(1) } : null;
+
+      // 下包后把 T 撤掉，否则双方交火会打断拆包
+      t.alive = false; t.hp = 0; t.group.visible = false;
+      const beforeCT = g.round.scoreCT;
+      let defused = false, defuseFrames = 0, sawProgress = false;
+      if (bomb) {
+        ct.pos.set(bomb.x + 0.6, 0, bomb.z);
+        ct.group.position.copy(ct.pos);
+        for (let i = 0; i < 64 * 20; i++) {
+          g.simulate(1 / 64);
+          defuseFrames++;
+          if (g.round._defuseProgress > 0.2) sawProgress = true;
+          if (g.round.phase === 'ended') { defused = true; break; }
+        }
+      }
+      const out = { assigned, planted, plantFrames, bomb, defused, defuseFrames, sawProgress,
+        result: g.round.result, scoreCT: g.round.scoreCT - beforeCT, bombGone: g.round.bomb === null };
+      g.round.start();   // 还原成干净的冻结局，避免影响后面的渲染断言
+      return out;
+    `);
+    check('T Bot 走到包点自动下包', bombFlow.assigned && bombFlow.planted && bombFlow.bomb,
+      `指派=${bombFlow.assigned} 下包=${bombFlow.planted} 耗时 ${(bombFlow.plantFrames / 64).toFixed(1)} s` +
+      (bombFlow.bomb ? ` 落点 (${bombFlow.bomb.x}, ${bombFlow.bomb.z})` : ''));
+    check('CT Bot 拆包成功并判 CT 胜', bombFlow.defused && bombFlow.result === false && bombFlow.scoreCT === 1 && bombFlow.bombGone,
+      `拆包=${bombFlow.defused} 进度出现过=${bombFlow.sawProgress} 耗时 ${(bombFlow.defuseFrames / 64).toFixed(1)} s ` +
+      `结果=${bombFlow.result} CT+${bombFlow.scoreCT}`);
+
     /* 14. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
