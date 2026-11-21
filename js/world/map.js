@@ -14,6 +14,9 @@ import { scaleBoxUV, mergeGeos } from './geo-utils.js';
 import { surfaceMaterial } from '../render/roblox.js';
 
 const TILE = 2.6;
+// 地面/台面上的掩体最低高度：保证 1.22m 蹲姿能完全躲在后面。
+// 叠放装饰（底部高于 0.62m）不参与归一化，避免把箱子上的布层拉成高墙。
+const COVER_MIN_HEIGHT = 1.36;
 
 /* ------------------------------------------------------------------ */
 /* 贴图与 UI 标记                                                      */
@@ -227,6 +230,13 @@ export function buildMap(root, buildOpts) {
    */
   function box(cx, cy, cz, w, h, d, kind, opts) {
     opts = opts || {};
+    if (opts.tag === 'cover' && h < COVER_MIN_HEIGHT) {
+      const bottom = cy - h / 2;
+      if (bottom < 0.62) {
+        h = COVER_MIN_HEIGHT;
+        cy = bottom + h / 2;
+      }
+    }
     const id = boxSeq++;
     // 覆写只影响这一件盒体；ID 由构建顺序决定，由于构建是确定性的，跨次重建立稳定。
     const ov = movedEdits[id];
@@ -788,7 +798,10 @@ export function buildMap(root, buildOpts) {
   // 南墙 z 20..20.5，门洞 x -28.4..-26.6（1.8 m）
   bWall(-29.475, 20.25, 2.15, 0.5, bh);
   bWall(-25.45, 20.25, 2.3, 0.5, bh);
-  bWall(-27.5, 20.25, 1.8, 0.5, bh - 2.2, 2.2); // 门楣
+  // 门楣净高 2.8 m：B 点台面高 0.58 m，站在台面上进门也需要足够净空
+  bWall(-27.5, 20.25, 1.8, 0.5, bh - 2.8, 2.8);
+  // 门内一级台阶：0.58 m 台面 → 0.29 m → 室内地面，避免进门后出不来
+  box(-27.5, 0.145, 20.95, 1.9, 0.29, 0.9, 'concrete', { tag: 'stairs' });
   // 东墙 x -24.8..-24.3：下窗 z 22.05..24.05（y 1.1..2.0），上窗 z 25..26.3（y 2.5..3.4）
   bWall(-24.55, 21.025, 0.5, 2.05, bh);
   bWall(-24.55, 23.05, 0.5, 2.0, 1.1);
