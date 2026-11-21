@@ -8,7 +8,7 @@ from: trae
 to: other
 task: T-000
 base: <main 或任务分支的最新 commit>
-branch: agent/trae/T-000-slug
+branch: task/trae/T-000-slug
 changed:
 - js/game/bots.js
 - js/render/avatar-glb.js

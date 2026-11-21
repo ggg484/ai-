@@ -15,7 +15,9 @@
 | `main` | 可运行、可打包的稳定线 | 只接受合并，不直接开发 |
 | `agent/trae` | Trae 这一侧的集成分支 | Trae |
 | `agent/other` | 另一个 AI 的集成分支 | 另一个 AI |
-| `agent/<name>/<task-id>-<slug>` | 单个任务分支 | 对应 Agent |
+| `task/<name>/<task-id>-<slug>` | 单个任务分支 | 对应 Agent |
+
+> 任务分支不要写成 `agent/<name>/...`：Git 不允许 `agent/trae` 和 `agent/trae/xxx` 同时存在。
 
 规则：
 
@@ -25,8 +27,9 @@
 4. 合并回 `main` 用 PR；PR 标题带任务号和 `[agent:<名字>]`。
 5. 禁止 force push 到 `main` 和别人的 `agent/*` 分支。
 6. 共享文件（见下）必须先领锁。
-7. `main` 受保护：必须走 PR，且 `smoke` 检查通过；不能直接 push、force push 或删除。
+7. `main` 受保护：必须走 PR，且 `smoke` 检查通过；不能直接 push、force push 或删除；管理员同样受约束。
 8. PR 标题里带 `[agent:trae]` / `[agent:other]` 会自动打标签。
+9. 合并使用 squash / rebase，保持线性历史；合并后删除任务分支。
 
 提交格式：
 
@@ -140,7 +143,7 @@ GitHub MCP 能直接读写仓库、建 Issue/PR，所以**不需要自建消息�
 git pull --rebase origin main
 
 # 建任务分支
-git checkout -b agent/trae/T-001-bot-anim main
+git checkout -b task/trae/T-001-bot-anim main
 
 # 改完提交
 git add -A

@@ -7,7 +7,7 @@
 
 - 状态：todo / doing / review / done
 - owner：trae / other
-- 分支：agent/<name>/T-XXX-<slug>
+- 分支：task/<name>/T-XXX-<slug>
 - base：<commit>
 - 涉及文件：...
 - 共享文件：是 / 否
