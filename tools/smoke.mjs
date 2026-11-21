@@ -1017,7 +1017,81 @@ async function main() {
       `AK ${buyInfo.akSpread} / Glock ${buyInfo.glockSpread} @20m`);
     check('Bot 死亡掉枪', buyInfo.droppedWeapon === 'glock', '复活武器=' + buyInfo.droppedWeapon);
 
-    /* 18. 渲染开销 */
+    /* 18. 战术执行：execute / retake / 角色站位（T-009 阶段 3） */
+    const tactic = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+      const A = g.map.sites.A;
+      const distToA = (b) => Math.hypot(b.pos.x - A.x, b.pos.z - A.z);
+      const avg = (arr) => arr.reduce((s, v) => s + v, 0) / Math.max(1, arr.length);
+      const goalD = (b) => (b.objective ? Math.hypot(b.objective.x - A.x, b.objective.z - A.z) : 999);
+
+      // --- 1) LIVE 指派：T 全队 execute，entry 压点、anchor 拖后 ---
+      r.beginMatch(r.mode);
+      g.player.alive = false; g.player.hp = 0;
+      r.phase = 'live'; r.timer = 120; r._plantSite = 'A';
+      r._assignBotObjectives('live');
+      const tAlive = g.tBots.filter((b) => b.alive);
+      const pushCount = tAlive.filter((b) =>
+        b.objective && (b.objective.type === 'push' || b.objective.type === 'plant')).length;
+      const entry = tAlive.find((b) => b.role === 'entry');
+      const anchor = tAlive.find((b) => b.role === 'anchor');
+      const entryGoalD = entry ? +goalD(entry).toFixed(1) : 999;
+      const anchorGoalD = anchor ? +goalD(anchor).toFixed(1) : 999;
+      const planterType = r._planter && r._planter.objective ? r._planter.objective.type : null;
+      const ctGuard = g.ctBots.filter((b) =>
+        b.alive && b.objective && b.objective.type === 'guard').length;
+
+      // --- 2) 8 秒纯 Bot 推进：T 平均距 A 应明显缩短 ---
+      const beforeD = avg(g.tBots.filter((b) => b.alive).map(distToA));
+      for (let i = 0; i < 64 * 8; i++) {
+        if (r.phase === 'ended') break;
+        g.simulate(1 / 64);
+      }
+      const afterD = avg(g.tBots.filter((b) => b.alive).map(distToA));
+
+      // --- 3) 下包后指派：T 散开守包、CT 回防、拆包人最近 ---
+      r.beginMatch(r.mode);
+      const ct0 = g.ctBots[0];
+      ct0.pos.set(A.x + 1, 0, A.z); ct0.group.position.copy(ct0.pos);
+      g.player.alive = false; g.player.hp = 0;
+      r.phase = 'planted'; r.timer = 40;
+      r.bomb = { x: A.x, z: A.z, site: 'A' };
+      r._assignBotObjectives('planted');
+      const tGuard = g.tBots.filter((b) =>
+        b.alive && b.objective && b.objective.type === 'guard').length;
+      const ctRetake = r._defuser
+        ? 1 + g.ctBots.filter((b) => b.alive && b !== r._defuser &&
+            b.objective && b.objective.type === 'retake').length
+        : 0;
+      const defuserIsClosest = r._defuser === ct0;
+      const retakeNear = g.ctBots
+        .filter((b) => b.alive && b.objective && b.objective.type === 'retake')
+        .every((b) => Math.hypot(b.objective.x - A.x, b.objective.z - A.z) <= 8.5);
+
+      r.beginMatch(r.mode);
+      g.money = 800; g.hud.setMoney(g.money);
+
+      return { pushCount, tCount: tAlive.length, planterType, entryGoalD, anchorGoalD, ctGuard,
+        beforeD: +beforeD.toFixed(1), afterD: +afterD.toFixed(1),
+        tGuard, ctRetake, defuserIsClosest, retakeNear };
+    `);
+    check('T 全队执行 execute',
+      tactic.pushCount === tactic.tCount && tactic.tCount >= 4 && tactic.planterType === 'plant',
+      `有目标=${tactic.pushCount}/${tactic.tCount} 下包人任务=${tactic.planterType}`);
+    check('entry 比 anchor 更靠前',
+      tactic.entryGoalD < tactic.anchorGoalD && tactic.entryGoalD <= 2.5,
+      `entry 目标距 A ${tactic.entryGoalD} m / anchor ${tactic.anchorGoalD} m`);
+    check('CT anchor 守包点', tactic.ctGuard >= 1, '守点 anchor=' + tactic.ctGuard);
+    check('execute 让 T 集体压上',
+      tactic.afterD < tactic.beforeD - 5,
+      `平均距 A ${tactic.beforeD} → ${tactic.afterD} m`);
+    check('下包后 T 散开守包', tactic.tGuard >= 3, '守包人数=' + tactic.tGuard);
+    check('下包后 CT 全员回防',
+      tactic.ctRetake >= 3 && tactic.defuserIsClosest && tactic.retakeNear,
+      `回防=${tactic.ctRetake} 最近的人拆包=${tactic.defuserIsClosest} 目标都在炸弹 8.5 m 内=${tactic.retakeNear}`);
+
+    /* 19. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));
