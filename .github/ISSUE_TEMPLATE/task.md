@@ -8,7 +8,7 @@ labels: task
 ## 任务
 
 - owner：trae / other
-- 分支：`agent/<name>/T-XXX-<slug>`
+- 分支：`task/<name>/T-XXX-<slug>`
 - base：
 - 涉及文件：
 - 是否涉及共享文件：是 / 否

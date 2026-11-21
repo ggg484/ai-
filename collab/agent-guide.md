@@ -14,7 +14,7 @@
 
 ## 你的分支
 
-- 从 `main` 切：`agent/<你的名字>/<task-id>-<slug>`
+- 从 `main` 切：`task/<你的名字>/<task-id>-<slug>`
 - 不要直接推 `main`（已开启分支保护）
 - 不要 force push 别人的分支
 - PR 必须通过 `smoke` 检查才能合并；PR 标题带 `[agent:<名字>]` 会自动打标签
