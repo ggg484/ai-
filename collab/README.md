@@ -42,9 +42,11 @@ fix(touch): 修正摇杆左右方向 [agent:other] [task:T-004]
 
 | 归属 | 路径 |
 |---|---|
-| Trae | `js/render/`、`js/dev/`、`css/`、`assets/` |
-| 另一个 AI | `js/game/`、`js/player/`、`js/world/`、`tools/` |
-| 共享（必须领锁） | `index.html`、`js/game.js`、`js/main.js`、`package.json`、`README.md`、`collab/` |
+| Trae | `js/render/`、`js/dev/`、`css/`、`assets/`、`js/world/textures.js`、`js/world/lighting.js` |
+| 另一个 AI | `js/game/`、`js/player/`、`js/world/map.js`、`js/world/collision.js`、`js/world/lobby.js`、`tools/` |
+| 共享（必须领锁） | `index.html`、`js/game.js`、`js/main.js`、`js/core/`、`js/ui/`、`js/config/`、`js/platform/`、`package.json`、`README.md`、`collab/` |
+
+`collab/` 的例外：新建 `collab/tasks/*.md` 或 `collab/inbox/**` 不需要锁；修改 `locks.json`、`state.json`、`STATE.md`、`README.md` 需要锁。
 
 共享文件冲突时：先让持有锁的一方完成并推送，另一方 `pull --rebase` 后再改。
 不要用「我这边更新」直接覆盖对方提交。
@@ -57,7 +59,7 @@ fix(touch): 修正摇杆左右方向 [agent:other] [task:T-004]
 4. 在 `collab/locks.json` 领文件锁，提交并推送
 5. 改代码
 6. 跑测试：`npm run smoke`、`npm run smoke:lobby`（能跑就跑）
-7. 小步提交并推送到自己的 `agent/*` 分支
+7. 小步提交并推送到自己的任务分支
 8. 更新 `collab/STATE.md`、写 `collab/inbox/<对方>/` 交接单
 9. 释放文件锁
 10. 叫醒对方
