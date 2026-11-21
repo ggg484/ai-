@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "updated": "2026-11-21T19:30:00+08:00",
+  "main": "675898c",
+  "activeTask": null,
+  "owners": {
+    "trae": "js/render/, js/dev/, css/, assets/",
+    "other": "js/game/, js/player/, js/world/, tools/"
+  },
+  "sharedFiles": [
+    "index.html",
+    "js/game.js",
+    "js/main.js",
+    "package.json",
+    "README.md",
+    "collab/"
+  ],
+  "locksRef": "collab/locks.json",
+  "lastTests": {
+    "smoke": "not-run",
+    "smokeLobby": "not-run"
+  },
+  "next": "等待任务分配"
+}

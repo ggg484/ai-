@@ -106,6 +106,23 @@ YYYYMMDD-HHMM-<from>-<topic>.md
 
 历史都留在 Git 提交和 inbox 里。
 
+## 如果对方用 GitHub MCP
+
+GitHub MCP 能直接读写仓库、建 Issue/PR，所以**不需要自建消息中继**：
+
+- 任务：用 Issue（模板 `.github/ISSUE_TEMPLATE/task.md`）
+- 代码：开 PR，使用 `.github/PULL_REQUEST_TEMPLATE.md`
+- 交接：写在 PR / Issue 评论里，格式同 `HANDOFF-TEMPLATE.md`
+- 机器状态：`collab/state.json` + `collab/locks.json`
+- 人工摘要：`collab/STATE.md`
+- 对方 AI 的入口说明：`collab/agent-guide.md`
+
+注意：
+
+- 两个 AI 如果共用同一个 GitHub 账号，PR 无法互相 approve；分支保护只能要求“走 PR”，不要要求 review。
+- GitHub MCP 通常不能跑本地命令；测试跑不了就写“未运行”，交给有执行环境的一方或 CI。
+- `main` 仍然是稳定线，GitHub MCP 也不要直接推 `main`。
+
 ## 人类在环
 
 两个手机 AI 都不是常驻进程，所以真正的“触发器”是使用者：

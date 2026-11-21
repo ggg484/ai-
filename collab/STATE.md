@@ -1,6 +1,7 @@
 # 当前协作状态
 
-> 只记录“现在”。历史看 Git 提交和 `collab/inbox/`。
+> 这是人类可读摘要；机器可读版本以 `collab/state.json` 为准。
+> 两者必须一起更新。历史看 Git 提交和 `collab/inbox/`。
 
 - 当前 owner：none
 - 当前任务：none
