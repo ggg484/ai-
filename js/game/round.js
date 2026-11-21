@@ -1,6 +1,7 @@
 // 回合状态机：购买 → 进行 → 安放 → 结束。
-// 骨架版胜负：清光敌人 / 炸弹引爆 = 胜；玩家阵亡 / 时间耗尽 = 负。
-// TODO(round): 半场交换、加时、Bot 拆包、包点封锁、经济连败补偿曲线。
+// 胜负：清光敌人 / 炸弹引爆 = T 胜；拆包 / 时间耗尽 / T 全灭 = CT 胜。
+// 已实现：Bot 拆包、加时赛（MR4 × 3）、连败补偿曲线。
+// TODO(round): 半场交换（等 T-008 钩子）、包点封锁。
 
 import * as THREE from '../../vendor/three.module.js';
 import { audio } from '../core/audio.js';
@@ -8,6 +9,14 @@ import { ECONOMY } from '../config/weapons.js';
 import { MODE_MAP } from '../config/modes.js';
 
 export const PHASE = { FREEZE: 'freeze', LIVE: 'live', PLANTED: 'planted', ENDED: 'ended' };
+
+// 加时赛：每个加时半场先到 4 分；最多 3 个加时，仍未分胜负则战平。
+// 加时统一发 10000，不继承常规赛经济，避免一方带着经济优势滚雪球。
+export const OVERTIME = { winScore: 4, maxOvertimes: 3, startMoney: 10000 };
+
+// 连败补偿：1400 / 1900 / 2400 / 2900 / 3400，第 5 连败起封顶。
+export const LOSS_BONUS_STEP = 500;
+export const LOSS_BONUS_MAX = 5;
 
 export class Round {
   constructor(game) {
@@ -30,6 +39,16 @@ export class Round {
     this.beepT = 0;
     this.matchOver = false;
     this._bombGroup = null;
+    // 阵营：3b 半场交换时翻转。现在整条链路仍按「玩家 = T」实现，
+    // 只把字段留好，end() 已经通过它折算玩家视角的胜负。
+    this.playerSide = 't';
+    // 加时赛：0 = 常规赛；1..3 = 第几个加时；otBase 记录每个加时的起始比分
+    this.overtime = 0;
+    this.otBase = { t: 0, ct: 0 };
+    this.otPending = false;
+    this.draw = false;
+    // 连败计数（按阵营），用于经济补偿与 T-009 的 Bot 钱包
+    this.lossStreak = { t: 0, ct: 0 };
   }
 
   beginMatch(mode) {
@@ -39,6 +58,12 @@ export class Round {
     this.scoreCT = 0;
     this.matchOver = false;
     this.endTimer = 0;
+    this.playerSide = 't';
+    this.overtime = 0;
+    this.otBase = { t: 0, ct: 0 };
+    this.otPending = false;
+    this.draw = false;
+    this.lossStreak = { t: 0, ct: 0 };
     this.start();
   }
 
@@ -54,12 +79,20 @@ export class Round {
     this._defuseProgress = 0;
     this.removeBomb();
 
+    // 加时赛开局统一发钱（必须在 onRoundStart 之前，购买界面会读 money）
+    if (this.otPending) {
+      this.otPending = false;
+      this._grantOvertimeMoney();
+    }
+
     g.roundEnding = false;
     g.player.respawnPoint = g.map.spawns.player;
     g.player.reset(g.map.spawns.player);
     g.bots.forEach((b) => b.reset());
-    g.hud.setPhase('购买时间');
-    g.hud.setObjective('购买装备，准备进攻 A / B');
+    g.hud.setPhase(this.overtime > 0 ? `加时赛 ${this.overtime}` : '购买时间');
+    g.hud.setObjective(this.overtime > 0
+      ? `加时赛 ${this.overtime} · 先到 ${OVERTIME.winScore} 分`
+      : '购买装备，准备进攻 A / B');
     g.hud.setBomb(false);
     g.hud.setRound(this.round);
     g.hud.setScore(this.scoreT, this.scoreCT);
@@ -305,27 +338,111 @@ export class Round {
     this.bomb = null;
   }
 
-  end(win, reason) {
+  end(tWin, reason) {
     if (this.phase === PHASE.ENDED) return;
     const g = this.game;
     this.phase = PHASE.ENDED;
-    this.result = win;
+    // tWin 始终表示「T 方是否获胜」；玩家视角由 playerSide 折算，3b 换边后这里不用改
+    const playerWin = this.playerSide === 't' ? tWin : !tWin;
+    this.result = playerWin;
     this.endTimer = 4;
     this.plantProgress = 0;
     g.hud.setPlant(0, false);
     g.hud.setBomb(false);
-    if (win) { this.scoreT++; g.addMoney(ECONOMY.win); }
-    else { this.scoreCT++; g.addMoney(ECONOMY.loss); }
+    if (tWin) this.scoreT++; else this.scoreCT++;
+    this._applyEconomy(tWin);
     g.hud.setScore(this.scoreT, this.scoreCT);
     g.hud.setPhase('回合结束');
-    g.hud.showRoundEnd(win, reason);
-    audio.play(win ? 'win' : 'lose', { volume: 0.8 });
-    g.endRound(win, reason);
+    g.hud.showRoundEnd(playerWin, reason);
+    audio.play(playerWin ? 'win' : 'lose', { volume: 0.8 });
+    g.endRound(playerWin, reason);
 
-    if (this.scoreT >= this.mode.winScore || this.scoreCT >= this.mode.winScore) {
-      this.matchOver = true;
-      this.endTimer = 1.2;
-      g.onMatchEnd(this.scoreT >= this.mode.winScore, reason);
+    this._checkMatchEnd(reason);
+  }
+
+  /** 经济：胜方固定奖励，败方按连败次数递增；赢一局立刻重置自己的连败计数。 */
+  _applyEconomy(tWin) {
+    if (tWin) {
+      this.lossStreak.t = 0;
+      this.lossStreak.ct = Math.min(LOSS_BONUS_MAX, this.lossStreak.ct + 1);
+    } else {
+      this.lossStreak.ct = 0;
+      this.lossStreak.t = Math.min(LOSS_BONUS_MAX, this.lossStreak.t + 1);
     }
+    const myWin = this.playerSide === 't' ? tWin : !tWin;
+    if (myWin) {
+      this.game.addMoney(ECONOMY.win);
+    } else {
+      const streak = this.playerSide === 't' ? this.lossStreak.t : this.lossStreak.ct;
+      this.game.addMoney(this._lossBonus(streak));
+    }
+  }
+
+  /** 连败补偿曲线：1400 / 1900 / 2400 / 2900 / 3400（封顶）。 */
+  _lossBonus(streak) {
+    const n = Math.max(1, Math.min(LOSS_BONUS_MAX, streak));
+    return ECONOMY.loss + LOSS_BONUS_STEP * (n - 1);
+  }
+
+  _checkMatchEnd(reason) {
+    const winScore = this.mode.winScore || 13;
+
+    if (this.overtime === 0) {
+      if (this.scoreT >= winScore || this.scoreCT >= winScore) {
+        this._finishMatch(this.scoreT > this.scoreCT, reason);
+        return;
+      }
+      // 常规赛打满（MR12 的 12:12）进入加时
+      if (this.scoreT === winScore - 1 && this.scoreCT === winScore - 1) {
+        this._enterOvertime();
+      }
+      return;
+    }
+
+    const dt = this.scoreT - this.otBase.t;
+    const dct = this.scoreCT - this.otBase.ct;
+    if (dt >= OVERTIME.winScore || dct >= OVERTIME.winScore) {
+      this._finishMatch(dt > dct, reason);
+      return;
+    }
+    if (dt === OVERTIME.winScore - 1 && dct === OVERTIME.winScore - 1) {
+      if (this.overtime >= OVERTIME.maxOvertimes) {
+        this.draw = true;
+        this._finishMatch(null, '三个加时后仍未分胜负');
+      } else {
+        this._enterOvertime();
+      }
+    }
+  }
+
+  _finishMatch(tWin, reason) {
+    const g = this.game;
+    this.matchOver = true;
+    this.endTimer = 1.2;
+    if (tWin === null) {
+      this.draw = true;
+      // 结算面板只认布尔值；平局用 reason 说明，胜负标记按「未获胜」处理
+      g.onMatchEnd(false, reason || '双方战平');
+      return;
+    }
+    const playerWin = this.playerSide === 't' ? tWin : !tWin;
+    g.onMatchEnd(playerWin, reason || (playerWin ? '目标达成' : '目标失守'));
+  }
+
+  _enterOvertime() {
+    const g = this.game;
+    this.overtime++;
+    this.otBase = { t: this.scoreT, ct: this.scoreCT };
+    this.otPending = true;
+    this.endTimer = 3;
+    g.hud.setPhase(`加时赛 ${this.overtime}`);
+    g.hud.setObjective(`加时赛 ${this.overtime} · 先到 ${OVERTIME.winScore} 分`);
+  }
+
+  /** 加时赛起始资金：双方拉平，不继承常规赛经济。Bot 钱包由 T-009 接管。 */
+  _grantOvertimeMoney() {
+    const g = this.game;
+    g.money = Math.min(ECONOMY.cap, OVERTIME.startMoney);
+    g.hud.setMoney(g.money);
   }
 }
