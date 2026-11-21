@@ -752,7 +752,98 @@ async function main() {
     check('三个加时后 3:3 判战平',
       otInfo.drawOver === true, 'matchOver+draw=' + otInfo.drawOver);
 
-    /* 15. 渲染开销 */
+    /* 15. Bot 经济：钱包 / 击杀 / 回合 / 下包 / 拆包 / 封顶（T-009 阶段 1） */
+    const botEco = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+      const CAP = 16000;
+      r.beginMatch(r.mode);
+      const startMoney = r.mode.startMoney || 800;
+      const init = g.bots.map((b) => b.money);
+      const b0 = g.bots[0], b1 = g.bots[1];
+      const keep = b0.money;
+      b0.money += 500;
+      const independent = b1.money === keep;
+      b0.money = keep;
+
+      // 击杀：T Bot 走 game._onBotShoot 真实链路打死 CT Bot
+      const t = g.allyBots[0], ct = g.enemyBots[0];
+      t.reset(); ct.reset();
+      t.money = 800; ct.money = 800;
+      const k0 = t.kills;
+      let shots = 0;
+      while (ct.alive && shots < 40) {
+        g._onBotShoot(t, { hit: true, head: false, dir: { x: 0, y: 0, z: 1 } }, ct);
+        shots++;
+      }
+      r.update(0);
+      const killCount = t.kills - k0;
+      const killGain = t.money - 800;
+
+      // 回合：CT 胜 → CT Bot +3250，T Bot 首败 +1400
+      const tBefore = t.money, ctBefore = ct.money;
+      r.end(false, 'test');
+      const lossGain = t.money - tBefore;
+      const winGain = ct.money - ctBefore;
+
+      // 第二连败 → +1900
+      r.phase = 'freeze'; r.matchOver = false; r.endTimer = 0;
+      const tBefore2 = t.money;
+      r.end(false, 'test');
+      const lossGain2 = t.money - tBefore2;
+
+      // 下包奖励：actor 是 Bot 时进 Bot 钱包
+      r.phase = 'live'; r.removeBomb();
+      const pm = t.money;
+      r.plant('A', { x: 44, y: 0, z: 16 }, t);
+      const plantGain = t.money - pm;
+      r.removeBomb();
+
+      // 拆包：300 拆包奖 + 3250 回合胜利
+      r.bomb = { x: 44, z: 16, site: 'A' };
+      r.phase = 'planted';
+      r._defuseProgress = 0.99;
+      r._defuser = ct;
+      ct.alive = true; ct.holding = true; ct.engage = false;
+      ct.pos.set(44, 0, 16); ct.group.position.copy(ct.pos);
+      const cm = ct.money;
+      r._defuseLogic(0.2);
+      const defuseGain = ct.money - cm;
+
+      // 封顶
+      r._addBotMoney(t, 999999, 'cap-test');
+      const capped = t.money === CAP;
+
+      // 日志（重置前取，重置会清空）
+      const logLen = r.economyLog.length;
+      const logOk = logLen > 0 && r.economyLog.every((e) =>
+        e.bot && e.team && e.reason && Number.isFinite(e.money) && Number.isFinite(e.delta));
+      const reasons = Array.from(new Set(r.economyLog.map((e) => e.reason)));
+
+      // 比赛开始重置
+      r.beginMatch(r.mode);
+      const afterReset = g.bots.every((b) => b.money === startMoney);
+
+      return { startMoney, init, independent, shots, killCount, killGain,
+        lossGain, winGain, lossGain2, plantGain, defuseGain, capped,
+        logLen, logOk, reasons, afterReset };
+    `);
+    check('Bot 初始钱包按模式起始资金且互相独立',
+      botEco.init.every((m) => m === botEco.startMoney) && botEco.independent,
+      'startMoney=' + botEco.startMoney + ' 数量=' + botEco.init.length);
+    check('Bot 击杀奖励 300', botEco.killCount === 1 && botEco.killGain === 300,
+      '击杀=' + botEco.killCount + ' 奖励=' + botEco.killGain + ' (' + botEco.shots + ' 枪)');
+    check('Bot 回合胜负结算', botEco.lossGain === 1400 && botEco.winGain === 3250,
+      '败方 +' + botEco.lossGain + ' / 胜方 +' + botEco.winGain);
+    check('Bot 连败补偿递增', botEco.lossGain2 === 1900, '第 2 连败 +' + botEco.lossGain2);
+    check('Bot 下包奖励 300', botEco.plantGain === 300, '+' + botEco.plantGain);
+    check('Bot 拆包奖励 300 + 回合胜利', botEco.defuseGain === 3550, '+' + botEco.defuseGain);
+    check('Bot 经济封顶 16000', botEco.capped === true, 'cap=' + botEco.capped);
+    check('经济日志可核对', botEco.logOk && botEco.logLen > 0,
+      botEco.logLen + ' 条 / 类型=' + JSON.stringify(botEco.reasons));
+    check('比赛开始重置 Bot 经济', botEco.afterReset === true, '全部回到 ' + botEco.startMoney);
+
+    /* 16. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));
