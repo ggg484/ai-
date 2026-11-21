@@ -830,7 +830,7 @@ async function main() {
     `);
     check('Bot 初始钱包按模式起始资金且互相独立',
       botEco.init.every((m) => m === botEco.startMoney) && botEco.independent,
-      'startMoney=' + botEco.startMoney + ' 数量=' + botEco.init.length);
+      'startMoney=' + botEco.startMoney + ' 数量=' + botEco.init.length + ' init=' + JSON.stringify(botEco.init));
     check('Bot 击杀奖励 300', botEco.killCount === 1 && botEco.killGain === 300,
       '击杀=' + botEco.killCount + ' 奖励=' + botEco.killGain + ' (' + botEco.shots + ' 枪)');
     check('Bot 回合胜负结算', botEco.lossGain === 1400 && botEco.winGain === 3250,
@@ -841,7 +841,8 @@ async function main() {
     check('Bot 经济封顶 16000', botEco.capped === true, 'cap=' + botEco.capped);
     check('经济日志可核对', botEco.logOk && botEco.logLen > 0,
       botEco.logLen + ' 条 / 类型=' + JSON.stringify(botEco.reasons));
-    check('比赛开始重置 Bot 经济', botEco.afterReset === true, '全部回到 ' + botEco.startMoney);
+    check('比赛开始重置 Bot 经济', botEco.afterReset === true,
+      '全部回到 ' + botEco.startMoney + ' / afterReset=' + botEco.afterReset + ' init=' + JSON.stringify(botEco.init));
 
     /* 16. 半场交换（T-003 阶段 3b） */
     const swapInfo = await cdp.eval(`
@@ -934,7 +935,89 @@ async function main() {
       swapInfo.otPending === true && swapInfo.otScore[0] === 15 && swapInfo.otScore[1] === 12,
       '排队=' + swapInfo.otPending + ' 比分=' + swapInfo.otScore.join(':'));
 
-    /* 17. 渲染开销 */
+    /* 17. Bot 购买与武器差异（T-009 阶段 2） */
+    const buyInfo = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+      r.beginMatch(r.mode);
+      const b = g.bots[0];
+
+      // 买满：4000 → AK 2700 + 护甲 650
+      b.money = 4000;
+      r.start();
+      const richWeapon = b.weaponId, richMoney = b.money, richArmor = b.armor;
+
+      // eco：1500 存钱，不硬买
+      b.money = 1500; b.weaponId = 'glock'; b.armor = 0;
+      r.start();
+      const ecoWeapon = b.weaponId, ecoMoney = b.money;
+
+      // 只够枪：2800 → AK，剩 100，买不起甲
+      b.money = 2800; b.weaponId = 'glock'; b.armor = 0;
+      r.start();
+      const gunOnlyWeapon = b.weaponId, gunOnlyMoney = b.money, gunOnlyArmor = b.armor;
+
+      // 护甲减伤：40 伤害 → 20 hp，护甲 -20
+      b.alive = true; b.hp = 100; b.armor = 100;
+      b.damage(40);
+      const armoredHp = b.hp, armoredArmor = b.armor;
+
+      // 无甲：40 伤害全吃
+      b.alive = true; b.hp = 100; b.armor = 0;
+      b.damage(40);
+      const bareHp = b.hp;
+
+      // 射速：AK 的射击间隔显著短于 Glock
+      b.weaponId = 'ak';
+      let akDelay = 0;
+      for (let i = 0; i < 200; i++) akDelay += b._shotDelay();
+      b.weaponId = 'glock';
+      let glockDelay = 0;
+      for (let i = 0; i < 200; i++) glockDelay += b._shotDelay();
+
+      // 精度：同一距离 AK 散布更小
+      b.weaponId = 'ak';
+      const akSpread = b._spreadAt(20);
+      b.weaponId = 'glock';
+      const glockSpread = b._spreadAt(20);
+
+      // 死亡掉枪
+      b.weaponId = 'ak'; b.alive = false;
+      b.reset();
+      const droppedWeapon = b.weaponId;
+
+      // 复位
+      r.beginMatch(r.mode);
+      g.money = 800; g.hud.setMoney(g.money);
+
+      return { richWeapon, richMoney, richArmor, ecoWeapon, ecoMoney,
+        gunOnlyWeapon, gunOnlyMoney, gunOnlyArmor,
+        armoredHp, armoredArmor, bareHp,
+        akDelay: +(akDelay / 200).toFixed(3), glockDelay: +(glockDelay / 200).toFixed(3),
+        akSpread: +akSpread.toFixed(4), glockSpread: +glockSpread.toFixed(4),
+        droppedWeapon };
+    `);
+    check('有钱买 AK + 护甲',
+      buyInfo.richWeapon === 'ak' && buyInfo.richMoney === 650 && buyInfo.richArmor === 100,
+      `武器=${buyInfo.richWeapon} 余额=${buyInfo.richMoney} 护甲=${buyInfo.richArmor}`);
+    check('eco 存钱不硬买',
+      buyInfo.ecoWeapon === 'glock' && buyInfo.ecoMoney === 1500,
+      `武器=${buyInfo.ecoWeapon} 余额=${buyInfo.ecoMoney}`);
+    check('只够枪时先买枪',
+      buyInfo.gunOnlyWeapon === 'ak' && buyInfo.gunOnlyMoney === 100 && buyInfo.gunOnlyArmor === 0,
+      `武器=${buyInfo.gunOnlyWeapon} 余额=${buyInfo.gunOnlyMoney} 护甲=${buyInfo.gunOnlyArmor}`);
+    check('护甲吸收一半伤害',
+      buyInfo.armoredHp === 80 && buyInfo.armoredArmor === 80 && buyInfo.bareHp === 60,
+      `有甲 hp=${buyInfo.armoredHp} armor=${buyInfo.armoredArmor} / 无甲 hp=${buyInfo.bareHp}`);
+    check('AK 射速快于手枪',
+      buyInfo.akDelay < buyInfo.glockDelay * 0.85,
+      `AK ${buyInfo.akDelay}s / Glock ${buyInfo.glockDelay}s`);
+    check('AK 精度高于手枪',
+      buyInfo.akSpread < buyInfo.glockSpread,
+      `AK ${buyInfo.akSpread} / Glock ${buyInfo.glockSpread} @20m`);
+    check('Bot 死亡掉枪', buyInfo.droppedWeapon === 'glock', '复活武器=' + buyInfo.droppedWeapon);
+
+    /* 18. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
       await new Promise((r) => setTimeout(r, 200));
