@@ -86,6 +86,9 @@ export class Game {
       team: 't', rig: window.__charRig
     }));
     this.bots = this.enemyBots.concat(this.allyBots);
+    this.playerSide = 't';
+    this.tBots = this.allyBots;
+    this.ctBots = this.enemyBots;
     this.round = new Round(this);
 
     // 大厅
@@ -358,6 +361,58 @@ export class Game {
     document.body.classList.add('in-lobby');
   }
 
+  _makeBots(team, spawns) {
+    return spawns.map((s) => new Bot(this.matchRoot, s, this.map.world, {
+      team, rig: window.__charRig
+    }));
+  }
+
+  /**
+   * 半场交换钩子：只负责阵营、出生点、Bot 重建与 HUD，不碰回合计分规则。
+   * round.js 在 3b 里先调 setPlayerSide(side)，再 reset 玩家/Bot。
+   */
+  setPlayerSide(side, force) {
+    side = side === 'ct' ? 'ct' : 't';
+    if (!force && side === this.playerSide) return;
+
+    const tStats = (this.tBots || []).map((b) => ({ k: b.kills, d: b.deaths }));
+    const ctStats = (this.ctBots || []).map((b) => ({ k: b.kills, d: b.deaths }));
+    for (const b of this.bots || []) this.matchRoot.remove(b.group);
+
+    if (side === 't') {
+      this.allyBots = this._makeBots('t', this.map.spawns.allies);
+      this.enemyBots = this._makeBots('ct', this.map.spawns.bots);
+      this.tBots = this.allyBots;
+      this.ctBots = this.enemyBots;
+    } else {
+      this.allyBots = this._makeBots('ct', this.map.spawns.ctAllies);
+      this.enemyBots = this._makeBots('t', this.map.spawns.tBots);
+      this.ctBots = this.allyBots;
+      this.tBots = this.enemyBots;
+    }
+    this.bots = this.enemyBots.concat(this.allyBots);
+    this.tBots.forEach((b, i) => {
+      const s = tStats[i];
+      if (s) { b.kills = s.k; b.deaths = s.d; }
+    });
+    this.ctBots.forEach((b, i) => {
+      const s = ctStats[i];
+      if (s) { b.kills = s.k; b.deaths = s.d; }
+    });
+
+    this.playerSide = side;
+    this.player.respawnPoint = side === 't' ? this.map.spawns.player : this.map.spawns.playerCT;
+    if (this.round) this.round.playerSide = side;
+    this.hud.setPlayerSide(side);
+    if (this.mode === 'match' && this.round && this.round.phase === PHASE.FREEZE) {
+      this.hud.setObjective(side === 'ct' ? '购买装备，准备防守 A / B' : '购买装备，准备进攻 A / B');
+    }
+  }
+
+  isPlayerTeam(unit) {
+    return unit === this.player || this.allyBots.includes(unit);
+  }
+
   startMatch(modeId) {
     const mode = MODE_MAP[modeId] || MODE_MAP.classic;
     this.modeCfg = mode;
@@ -368,6 +423,7 @@ export class Game {
     this.matchOver = false;
     this.paused = false;
     this.panelOpen = false;
+    this.setPlayerSide('t');
     this.money = mode.startMoney || ECONOMY.start;
     this.owned = { glock: true, ak: false };
     this.currentWeaponId = 'glock';
@@ -680,7 +736,12 @@ export class Game {
 
     const live = this.round.phase === PHASE.LIVE || this.round.phase === PHASE.PLANTED;
     if (live) {
-      const ctx = { player: this.player, tBots: this.allyBots, ctBots: this.enemyBots };
+      const ctx = {
+        player: this.player,
+        playerTeam: this.playerSide,
+        tBots: this.tBots,
+        ctBots: this.ctBots
+      };
       for (const b of this.bots) {
         b.update(dt, ctx, this.map.waypoints, {
           onBotShoot: (bot, shot, target) => this._onBotShoot(bot, shot, target),
@@ -1184,8 +1245,9 @@ export class Game {
     const killed = target.damage(dmg, shot.head);
     if (killed) {
       bot.kills++;
-      const a = bot.team === 't' ? '队友 ' + bot.label : '敌人 ' + bot.label;
-      const b = target.team === 't' ? '队友 ' + target.label : '敌人 ' + target.label;
+      const ally = (u) => u && u.team === this.playerSide;
+      const a = ally(bot) ? '队友 ' + bot.label : '敌人 ' + bot.label;
+      const b = ally(target) ? '队友 ' + target.label : '敌人 ' + target.label;
       this.hud.killfeed(a + ' [ 步枪 ] ' + b + (shot.head ? ' ◎' : ''));
     }
   }
@@ -1206,6 +1268,7 @@ export class Game {
     this.hud.setVitals(this.player.hp, this.player.armor);
     this.hud.setMoney(this.money);
     this.hud.setWeapon(this.weapon.name, this.weapon.ammo, this.weapon.reserve, this.currentWeaponId === 'glock' ? 1 : 2);
+    this.hud.setObjective(this.playerSide === 'ct' ? '购买装备，准备防守 A / B' : '购买装备，准备进攻 A / B');
   }
 
   endRound(win, reason) {
@@ -1362,16 +1425,18 @@ export class Game {
         this.hud.setScore(this.round.scoreT, this.round.scoreCT);
         this.hud.drawRadar(this.map, this.player, this.bots, this.round.bomb);
 
-        const tRows = [{
+        const playerRows = [{
           name: this.playerName || '玩家',
           kills: this.playerKills, deaths: this.playerDeaths,
           alive: this.player.alive, you: true
         }].concat(this.allyBots.map((b) => ({
           name: b.label, kills: b.kills, deaths: b.deaths, alive: b.alive, you: false
         })));
-        const ctRows = this.enemyBots.map((b) => ({
+        const enemyRows = this.enemyBots.map((b) => ({
           name: b.label, kills: b.kills, deaths: b.deaths, alive: b.alive, you: false
         }));
+        const tRows = this.playerSide === 't' ? playerRows : enemyRows;
+        const ctRows = this.playerSide === 'ct' ? playerRows : enemyRows;
         this.hud.setRoster(tRows, ctRows);
         this.hud.showScoreboard(this.input.isDown('scoreboard'), { t: tRows, ct: ctRows });
 
