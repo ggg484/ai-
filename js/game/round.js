@@ -18,6 +18,9 @@ export const OVERTIME = { winScore: 4, maxOvertimes: 3, startMoney: 10000 };
 export const LOSS_BONUS_STEP = 500;
 export const LOSS_BONUS_MAX = 5;
 
+// 拆包奖励：ECONOMY 里没有该项，按 CS 惯例固定 300。
+const DEFUSE_REWARD = 300;
+
 export class Round {
   constructor(game) {
     this.game = game;
@@ -49,6 +52,9 @@ export class Round {
     this.draw = false;
     // 连败计数（按阵营），用于经济补偿与 T-009 的 Bot 钱包
     this.lossStreak = { t: 0, ct: 0 };
+    // T-009：Bot 经济日志与击杀计数快照（每帧对比增量发钱，不改 game.js）
+    this.economyLog = [];
+    this._killSnapshot = new Map();
   }
 
   beginMatch(mode) {
@@ -64,7 +70,18 @@ export class Round {
     this.otPending = false;
     this.draw = false;
     this.lossStreak = { t: 0, ct: 0 };
+    this.resetBotEconomy();
     this.start();
+  }
+
+  /** 比赛开始 / 半场交换时重置 Bot 经济：全部按模式起始资金，清空日志。 */
+  resetBotEconomy() {
+    const money = this.mode.startMoney || ECONOMY.start;
+    for (const b of (this.game.bots || [])) {
+      b.money = Math.min(ECONOMY.cap, money);
+      this._killSnapshot.set(b, b.kills || 0);
+    }
+    this.economyLog = [];
   }
 
   start() {
@@ -103,6 +120,10 @@ export class Round {
   update(dt) {
     const g = this.game;
     const player = g.player;
+
+    // T-009：击杀结算。Bot 的 kills 由 game.js 维护，这里只对比增量，
+    // 避免为了加钱去改 game.js 的 _onBotShoot。
+    this._syncBotKillRewards();
 
     if (this.phase === PHASE.ENDED) {
       this.endTimer -= dt;
@@ -161,18 +182,19 @@ export class Round {
     const p = g.player;
     let site = null;
     let pos = null;
+    let actor = null;
 
     // 玩家优先：站在包点按住使用键
     if (p.alive) {
       const s = this.siteAt(p.position.x, p.position.z);
-      if (s && g.input.isDown('use')) { site = s; pos = p.position; }
+      if (s && g.input.isDown('use')) { site = s; pos = p.position; actor = p; }
     }
     // 玩家没接手，就看被指派的 Bot 是否到位站定（交战状态下不准下包）
     if (!site) {
       const b = this._planter;
       if (b && b.alive && b.holding && !b.engage) {
         const s = this.siteAt(b.pos.x, b.pos.z);
-        if (s) { site = s; pos = b.pos; }
+        if (s) { site = s; pos = b.pos; actor = b; }
       }
     }
 
@@ -181,7 +203,7 @@ export class Round {
       g.hud.setPlant(Math.min(1, this.plantProgress), true);
       if (this.plantProgress >= 1) {
         this.plantProgress = 0;
-        this.plant(site, pos);
+        this.plant(site, pos, actor);
       }
     } else if (this.plantProgress > 0) {
       this.plantProgress = Math.max(0, this.plantProgress - dt * 2.5);
@@ -253,6 +275,7 @@ export class Round {
       g.hud.setObjective('拆除中 ' + Math.round(Math.min(1, this._defuseProgress) * 100) + '%');
       if (this._defuseProgress >= 1) {
         this._defuseProgress = 0;
+        if (b) this._addBotMoney(b, DEFUSE_REWARD, 'defuse');
         this.removeBomb();
         g.hud.setBomb(false);
         this.end(false, '炸弹已被拆除');
@@ -273,7 +296,7 @@ export class Round {
     return null;
   }
 
-  plant(site, pos) {
+  plant(site, pos, actor) {
     const g = this.game;
     this.phase = PHASE.PLANTED;
     this.timer = this.mode.bombTime || 40;
@@ -283,7 +306,9 @@ export class Round {
     g.hud.setObjective('守住炸弹直到引爆');
     g.hud.setBomb(true);
     g.hud.setBombTimer(this.timer);
-    g.addMoney(ECONOMY.plant);
+    // 下包奖励给实际下包的人：玩家走原路径，Bot 走独立钱包
+    if (actor && actor !== g.player) this._addBotMoney(actor, ECONOMY.plant, 'plant');
+    else g.addMoney(ECONOMY.plant);
     audio.play('plant', { volume: 0.8 });
 
     const grp = new THREE.Group();
@@ -376,6 +401,47 @@ export class Round {
       const streak = this.playerSide === 't' ? this.lossStreak.t : this.lossStreak.ct;
       this.game.addMoney(this._lossBonus(streak));
     }
+    // Bot 队伍经济：与玩家同规则，按各自阵营的连败计数结算
+    for (const b of (this.game.bots || [])) {
+      const botWin = b.team === 't' ? tWin : !tWin;
+      if (botWin) this._addBotMoney(b, ECONOMY.win, 'round-win');
+      else this._addBotMoney(b, this._lossBonus(this.lossStreak[b.team]), 'round-loss');
+    }
+  }
+
+  /** 击杀奖励：对比 Bot.kills 的增量，谁涨了给谁加钱（含 Bot 击杀玩家）。 */
+  _syncBotKillRewards() {
+    for (const b of (this.game.bots || [])) {
+      // 换边会重建 Bot 对象：新对象先建基线，避免把历史击杀一次性折现
+      if (!this._killSnapshot.has(b)) {
+        this._killSnapshot.set(b, b.kills || 0);
+        continue;
+      }
+      const prev = this._killSnapshot.get(b);
+      const now = b.kills || 0;
+      if (now > prev) {
+        this._addBotMoney(b, (now - prev) * ECONOMY.kill, 'kill');
+        this._killSnapshot.set(b, now);
+      } else if (now < prev) {
+        this._killSnapshot.set(b, now);   // 被外部重置，跟随即可
+      }
+    }
+  }
+
+  /** Bot 加钱：ECONOMY.cap 封顶，负值不会出现，实际入账记一条日志。 */
+  _addBotMoney(bot, amount, reason) {
+    if (!amount) return 0;
+    const before = bot.money || 0;
+    bot.money = Math.max(0, Math.min(ECONOMY.cap, before + amount));
+    const delta = bot.money - before;
+    if (delta !== 0) {
+      this.economyLog.push({
+        round: this.round, bot: bot.label, team: bot.team,
+        delta, money: bot.money, reason
+      });
+      if (this.economyLog.length > 120) this.economyLog.shift();
+    }
+    return delta;
   }
 
   /** 连败补偿曲线：1400 / 1900 / 2400 / 2900 / 3400（封顶）。 */

@@ -435,6 +435,8 @@ export class Bot {
     this.deadT = 0;
     this.kills = 0;
     this.deaths = 0;
+    // T-009：Bot 独立经济。回合之间保留，比赛开始 / 半场由 round.js 重置。
+    this.money = 0;
 
     this.group = new THREE.Group();
     this.group.name = this.id;
