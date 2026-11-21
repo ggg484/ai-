@@ -103,8 +103,8 @@ function matSet(opts) {
     suppressor: make({ color: 0x24282b, metalness: 0.82, roughness: 0.4 }, metalTexture({ tone: 54, scratch: 1.2 })),
     olive: make({ color: 0x55603c, metalness: 0.05, roughness: 0.66 }, polymerTexture(70)),
     hardware: make({ color: 0x3a3f42, metalness: 0.86, roughness: 0.38 }, metalTexture({ tone: 64, scratch: 1.1 })),
-    glove: make({ color: 0x2e2a24, metalness: 0.04, roughness: 0.88 }),
-    sleeve: make({ color: 0x4b493d, metalness: 0.02, roughness: 0.96 })
+    glove: make({ color: 0x241e15, metalness: 0.04, roughness: 0.9 }),
+    sleeve: make({ color: 0x3f4030, metalness: 0.02, roughness: 0.96 })
   };
   for (const [role, m] of Object.entries(out)) {
     m.userData.weaponRole = role;
@@ -152,39 +152,35 @@ export function refreshWeaponTextures() {
 
 function addHands(parts, opts) {
   if (opts && opts.hands === false) return;
-  // 握把手：掌 + 四指 + 拇指 + 袖口
-  const g1 = roundedBox(0.072, 0.085, 0.095);
-  place(g1, 0.006, -0.115, 0.14, 0, 0, 0.06);
+  // 握把手：掌 + 四指 + 拇指 + 袖口。所有零件都贴着握把/护木，不能悬空。
+  const g1 = roundedBox(0.075, 0.095, 0.105);
+  place(g1, 0.004, -0.108, 0.145, 0, 0, 0.06);
   parts.glove.push(g1);
+  for (let i = 0; i < 4; i++) {
+    const f = new THREE.CapsuleGeometry(0.0095, 0.034, 3, 6);
+    f.rotateZ(Math.PI / 2);
+    place(f, 0.036, -0.16 + i * 0.017, 0.115, 0, 0, 0.12);
+    parts.glove.push(f);
+  }
+  const th = new THREE.CapsuleGeometry(0.011, 0.038, 3, 6);
+  th.rotateX(Math.PI / 2);
+  place(th, -0.036, -0.112, 0.175, 0.15, 0, -0.35);
+  parts.glove.push(th);
+
+  // 护木手（左手托枪）：掌压在护木下方，手指从另一侧扣住
+  const g2 = roundedBox(0.082, 0.07, 0.11);
+  place(g2, -0.008, -0.058, -0.255, 0, 0, -0.12);
+  parts.glove.push(g2);
   for (let i = 0; i < 4; i++) {
     const f = new THREE.CapsuleGeometry(0.009, 0.032, 3, 6);
     f.rotateX(Math.PI / 2);
-    place(f, 0.036, -0.145 + i * 0.014, 0.115, 0, 0, 0.2);
+    place(f, 0.038, -0.082 + i * 0.013, -0.255, 0, 0, 0.1);
     parts.glove.push(f);
   }
-  const th = new THREE.CapsuleGeometry(0.011, 0.035, 3, 6);
-  th.rotateX(Math.PI / 2);
-  place(th, -0.034, -0.115, 0.16, 0.2, 0, -0.5);
-  parts.glove.push(th);
-  const sl = new THREE.CapsuleGeometry(0.034, 0.15, 4, 8);
-  sl.rotateX(Math.PI / 2 - 0.55);
-  place(sl, 0.045, -0.22, 0.24, 0, 0.18, 0.16);
-  parts.sleeve.push(sl);
-
-  // 护木手（左手托枪）
-  const g2 = roundedBox(0.078, 0.06, 0.1);
-  place(g2, -0.012, -0.062, -0.3, 0, 0, -0.16);
-  parts.glove.push(g2);
-  for (let i = 0; i < 4; i++) {
-    const f = new THREE.CapsuleGeometry(0.0085, 0.03, 3, 6);
-    f.rotateX(Math.PI / 2);
-    place(f, 0.038, -0.085 + i * 0.012, -0.3, 0, 0, 0.1);
-    parts.glove.push(f);
-  }
-  const sl2 = new THREE.CapsuleGeometry(0.032, 0.14, 4, 8);
-  sl2.rotateX(Math.PI / 2 + 0.5);
-  place(sl2, -0.05, -0.12, -0.22, 0, -0.2, -0.12);
-  parts.sleeve.push(sl2);
+  const th2 = new THREE.CapsuleGeometry(0.01, 0.034, 3, 6);
+  th2.rotateX(Math.PI / 2);
+  place(th2, -0.045, -0.04, -0.275, 0.2, 0, 0.35);
+  parts.glove.push(th2);
 }
 
 /* ------------------------------------------------------------------ */

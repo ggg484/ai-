@@ -30,8 +30,8 @@ function volumeOf(a) {
   return Math.max(0.0001, (a.maxX - a.minX) * (a.maxY - a.minY) * (a.maxZ - a.minZ));
 }
 
-function audit(map) {
-  const list = map.placed || [];
+export function audit(map) {
+  const list = (map.placed || []).filter((p) => !p.hidden);
   const issues = [];
   const bounds = map.bounds || { minX: -36, maxX: 36, minZ: -32, maxZ: 32 };
   const boxes = list.map((p) => ({ p, b: boxOf(p) }));
@@ -175,6 +175,8 @@ export function installDevTools(game) {
       <button id="dev-top">俯视</button>
       <button id="dev-free">自由飞</button>
       <button id="dev-match">进入对局</button>
+      <button id="dev-editor">地图工坊</button>
+      <button id="dev-rig">模型工坊</button>
       <button id="dev-cam">复制坐标</button>
     </div>
     <div class="row">
@@ -456,6 +458,12 @@ export function installDevTools(game) {
   $('dev-free').addEventListener('click', () => toggleFree());
   $('dev-match').addEventListener('click', () => {
     if (game.mode !== 'match') game.startMatch('classic');
+  });
+  $('dev-editor').addEventListener('click', () => {
+    window.open(location.pathname + '?editor=1', '_blank');
+  });
+  $('dev-rig').addEventListener('click', () => {
+    window.open(location.pathname + '?rig=1', '_blank');
   });
   $('dev-cam').addEventListener('click', () => {
     const c = game.engine.camera.position;

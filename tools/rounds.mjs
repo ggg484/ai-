@@ -58,12 +58,13 @@ class CDP {
       ws.addEventListener('error', () => rej(new Error('ws fail')));
     });
   }
-  send(method, params) {
+  send(method, params, timeoutMs) {
     const id = ++this.seq;
     return new Promise((res, rej) => {
       this.pending.set(id, { resolve: res, reject: rej });
       this.ws.send(JSON.stringify({ id, method, params: params || {} }));
-      setTimeout(() => { if (this.pending.has(id)) { this.pending.delete(id); rej(new Error('timeout ' + method)); } }, 90000);
+      setTimeout(() => { if (this.pending.has(id)) { this.pending.delete(id); rej(new Error('timeout ' + method)); } },
+        timeoutMs || 90000);
     });
   }
   async eval(expr) {
@@ -105,21 +106,21 @@ const SHOTS = [
     id: 'map-panorama', group: 'map',
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
-    action: 'window.__devTools.setCam({x:0,y:44,z:-62,yaw:Math.PI,pitch:-0.46,fov:64}); return 1;',
+    action: 'window.__devTools.setCam({x:0,y:56,z:-78,yaw:Math.PI,pitch:-0.5,fov:64}); return 1;',
     wait: 1800
   },
   {
     id: 'site-a', group: 'map',
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
-    action: 'window.__devTools.setCam({x:26,y:2.3,z:5,yaw:Math.PI,pitch:-0.02,fov:72}); return 1;',
+    action: 'window.__devTools.setCam({x:34.5,y:2.0,z:9,yaw:-2.35,pitch:0.0,fov:72}); return 1;',
     wait: 1400
   },
   {
     id: 'site-b', group: 'map',
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
-    action: 'window.__devTools.setCam({x:-24,y:2.3,z:1,yaw:Math.PI,pitch:-0.02,fov:72}); return 1;',
+    action: 'window.__devTools.setCam({x:-34.5,y:2.0,z:9,yaw:2.35,pitch:0.0,fov:72}); return 1;',
     wait: 1400
   },
   {
@@ -130,28 +131,137 @@ const SHOTS = [
     wait: 1400
   },
   {
+    id: 'mid-bridge', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:0,y:3.3,z:21,yaw:0,pitch:-0.04,fov:72}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'a-long', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:31,y:2.2,z:-22,yaw:Math.PI,pitch:-0.02,fov:72}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'b-tunnel', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:-31.5,y:2.2,z:-23,yaw:Math.PI,pitch:-0.02,fov:72}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'a-terrace', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:24.5,y:4.62,z:26.6,yaw:0,pitch:-0.12,fov:72}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'b-house', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:-17.5,y:2.0,z:13.5,yaw:2.35,pitch:0.03,fov:70}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'b-loft', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:-27.5,y:1.7,z:21.6,yaw:Math.PI,pitch:0.16,fov:76}); return 1;',
+    wait: 1400
+  },
+  {
+    id: 'golden-a', group: 'map',
+    // 光影验收：保留实时阴影，机位与 site-a 一致
+    url: '?autostart=1&quality=high&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:34.5,y:2.0,z:9,yaw:-2.35,pitch:0.0,fov:72}); return 1;',
+    wait: 2000
+  },
+  {
+    id: 't-spawn', group: 'map',
+    url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
+    ready: 'return !!(window.__devTools && window.__game.mode === "match" && window.__game.started);',
+    action: 'window.__devTools.setCam({x:8,y:2.3,z:-37,yaw:1.1,pitch:-0.02,fov:72}); return 1;',
+    wait: 1400
+  },
+  {
     id: 'unit-closeup', group: 'unit',
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.bots && window.__game.bots.length);',
-    action: `
-      const g = window.__game, b = g.bots[0], p = b.pos;
-      const cx = p.x + 2.1, cz = p.z + 2.1;
-      const yaw = Math.atan2(-(p.x - cx), -(p.z - cz));
-      window.__devTools.setCam({x:cx,y:1.75,z:cz,yaw:yaw,pitch:-0.12,fov:38});
-      return 1;`,
-    wait: 1500
+    // 固定「模型台」：把 Bot 摆到 T 出生点前的空地、正对镜头、举枪姿态，
+    // 相机也一并写死。每轮构图完全一致，截图可逐轮对比。
+    action: 'window.__devTools.setCam({x:0,y:1.58,z:-20.4,yaw:Math.PI,pitch:-0.02,fov:38}); return 1;',
+    wait: 1200,
+    post: `
+      const g = window.__game, b = g.bots[0], cam = g.engine.camera;
+      b.pos.set(0.0, 0, -25.0);
+      b.group.position.copy(b.pos);
+      // 相机在角色右前方，角色转向相机；太阳在相机一侧，正面不会落在阴影里
+      const camYaw = 0.75;
+      b.group.rotation.set(0, Math.PI + camYaw, 0);
+      const p = b.humanoid.userData.parts;
+      if (p) {
+        p.armR.rotation.set(1.35, 0, -0.06);
+        p.armL.rotation.set(1.50, 0, 0.14);
+        p.legL.rotation.set(0, 0, 0);
+        p.legR.rotation.set(0, 0, 0);
+      } else if (b.avatar && b.avatar.action) {
+        b.avatar.action.paused = true;
+        b.avatar.action.time = 0;
+        b.avatar.mixer.update(0.001);
+        b.group.updateMatrixWorld(true);
+        if (b.avatarHand) {
+          const hp = b.avatarHand.getWorldPosition(b._handPos);
+          b.group.worldToLocal(hp);
+          b.weaponMount.position.set(hp.x, hp.y + 0.1, hp.z - 0.04);
+        }
+      }
+      b.group.updateMatrixWorld(true);
+      const portrait = innerWidth < innerHeight;
+      window.__devTools.setCam({x:portrait?3.6:2.60,y:1.40,z:portrait?-21.6:-22.2,yaw:camYaw,pitch:-0.02,fov:portrait?48:34});
+      g._updateCamera(0.016);
+      g.engine.renderer.render(g.engine.scene, cam);
+      return 1;`
   },
   {
     id: 'unit-duo', group: 'unit',
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.bots && window.__game.bots.length > 1);',
-    action: `
-      const g = window.__game, b = g.bots[1], p = b.pos;
-      const cx = p.x + 1.4, cz = p.z + 3.4;
-      const yaw = Math.atan2(-(p.x - cx), -(p.z - cz));
-      window.__devTools.setCam({x:cx,y:1.9,z:cz,yaw:yaw,pitch:-0.10,fov:46});
-      return 1;`,
-    wait: 1500
+    action: 'window.__devTools.setCam({x:0,y:1.6,z:-19.5,yaw:Math.PI,pitch:-0.02,fov:44}); return 1;',
+    wait: 1200,
+    post: `
+      const g = window.__game, cam = g.engine.camera;
+      const spots = [[-1.05, -24.6], [1.05, -24.9]];
+      [g.bots[0], g.bots[1]].forEach((b, i) => {
+        b.pos.set(spots[i][0], 0, spots[i][1]);
+        b.group.position.copy(b.pos);
+        b.group.rotation.set(0, Math.PI + (i ? -0.16 : 0.16), 0);
+        const p = b.humanoid.userData.parts;
+        if (p) {
+          p.armR.rotation.set(1.35, 0, -0.06);
+          p.armL.rotation.set(1.50, 0, 0.14);
+          p.legL.rotation.set(0, 0, 0);
+          p.legR.rotation.set(0, 0, 0);
+        } else if (b.avatar && b.avatar.action) {
+          b.avatar.action.paused = true;
+          b.avatar.action.time = 0;
+          b.avatar.mixer.update(0.001);
+          b.group.updateMatrixWorld(true);
+          if (b.avatarHand) {
+            const hp = b.avatarHand.getWorldPosition(b._handPos);
+            b.group.worldToLocal(hp);
+            b.weaponMount.position.set(hp.x, hp.y + 0.1, hp.z - 0.04);
+          }
+        }
+        b.group.updateMatrixWorld(true);
+      });
+      window.__devTools.setCam({x:0,y:1.5,z:innerWidth<innerHeight?-19.2:-20.0,yaw:0,pitch:-0.03,fov:innerWidth<innerHeight?52:34});
+      g._updateCamera(0.016);
+      g.engine.renderer.render(g.engine.scene, cam);
+      return 1;`
   },
   {
     id: 'weapon-ak', group: 'weapon',
@@ -176,27 +286,43 @@ const SHOTS = [
     url: '?autostart=1&quality=high&shadows=0&noadapt=1' + DEV,
     ready: 'return !!(window.__devTools && window.__game.bots && window.__game.bots.length);',
     action: `
-      const g = window.__game, b = g.bots[0], p = b.pos;
-      const px = p.x + 3.4, pz = p.z + 3.4;
-      g.teleportTo(px, 0, pz, Math.atan2(p.x - px, p.z - pz));
-      await new Promise(r => setTimeout(r, 700));
+      const g = window.__game;
+      g.teleportTo(21, 0, 1.5, 0);
+      await new Promise(r => setTimeout(r, 900));
       window.__devTools.setCam(null);
       return 1;`,
-    wait: 1200,
+    wait: 1400,
     post: `
-      const g = window.__game, v = g.viewmodel, b = g.bots[0];
+      const g = window.__game, v = g.viewmodel;
+      let best = null, bd = 1e9;
+      for (const b of g.bots) {
+        const d = b.pos.distanceTo(g.player.position);
+        if (d < bd) { bd = d; best = b; }
+      }
+      if (best) {
+        g.player.yaw = Math.atan2(best.pos.x - g.player.position.x, best.pos.z - g.player.position.z);
+        g.player.pitch = 0;
+      }
       v.flash.visible = true; v.flashT = 9; v.flash.rotation.z = 0.5;
       const muzzle = v.muzzlePosition(g.player.position.clone());
-      const end = b.pos.clone(); end.y += 1.15;
+      const end = best ? best.pos.clone() : g.player.position.clone().add({ x: 0, y: 1, z: -12 });
+      end.y += 1.15;
       g._spawnTracer(muzzle, end, 0xffe2a8);
-      b.bodyMat.emissive.setHex(0x992233);
+      if (best) {
+        best.hitT = 0.28;
+        best.hitGlow.visible = true;
+        best.hitGlow.material.opacity = 0.55;
+        best.muzzleT = 0.06;
+        best.flash.visible = true;
+      }
+      if (g.engine) g.engine.renderer.render(g.engine.scene, g.engine.camera);
       return 1;`
   },
   {
     id: 'lobby', group: 'scene',
     url: '?quality=high&noadapt=1&crowd=220&far=180' + DEV,
     ready: 'return !!(window.__devTools && window.__game.mode === "lobby" && window.__game.started);',
-    action: 'window.__game.teleportTo(0, 0, 14, Math.PI); window.__game.player.pitch = -0.05; return 1;',
+    action: 'window.__game.teleportTo(0, 0, 17, Math.PI); window.__game.player.pitch = -0.05; return 1;',
     wait: 2200
   }
 ];
@@ -264,17 +390,44 @@ async function main() {
         }
         await sleep(shot.wait || 1200);
         if (shot.action) await cdp.eval(shot.action).catch((e) => console.error('  action:', e.message));
+        // 开发者面板不出现在正式截图里（仅保留 API 供脚本调用）
+        await cdp.eval(
+          'const p = document.querySelector("#dev-tools"); if (p) p.style.display = "none"; return 1;'
+        ).catch(() => null);
         await sleep(700);
-        await cdp.eval('window.requestAnimationFrame = function(){ return 0; }; 1');
-        await sleep(250);
+        // 冻结循环后手动渲染一帧，保证合成层有新鲜内容（否则截图会等到超时）。
+        // 同时手动推进一次相机：headless 下 rAF 可能被节流，不能依赖主循环应用自由机位。
+        await cdp.eval(
+          'window.requestAnimationFrame = function(){ return 0; };' +
+          'const g = window.__game;' +
+          'if (g && g._updateCamera) g._updateCamera(0.016);' +
+          'if (g && g.engine && g.engine.renderer) g.engine.renderer.render(g.engine.scene, g.engine.camera);' +
+          'return 1;'
+        ).catch((e) => console.error('  freeze:', e.message));
+        await sleep(200);
         if (shot.post) await cdp.eval(shot.post).catch((e) => console.error('  post:', e.message));
         await sleep(150);
-        const png = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        let png = null;
+        for (let attempt = 0; attempt < 2 && !png; attempt++) {
+          try {
+            png = await cdp.send('Page.captureScreenshot', { format: 'png' }, 240000);
+          } catch (e) {
+            console.error('  capture retry ' + (attempt + 1) + ': ' + e.message);
+            await sleep(2000);
+          }
+        }
+        if (!png) {
+          console.error('  capture failed: ' + shot.id);
+          report.shots.push({ vp, id: shot.id, error: 'capture-failed' });
+          continue;
+        }
         writeFileSync(file, Buffer.from(png.data, 'base64'));
         const info = await cdp.eval(
-          'const i = window.__engine ? window.__engine.renderer.info.render : null; ' +
-          'const p = window.__perf || {}; ' +
-          'return i ? { calls: i.calls, tris: i.triangles, fps: p.fps || 0, dpr: p.dpr || 0 } : null;'
+          'const g = window.__game;' +
+          'const i = g && g.engine ? g.engine.renderer.info.render : null;' +
+          'const p = window.__perf || {};' +
+          'return { calls: p.calls || (i ? i.calls : 0), tris: p.triangles || (i ? i.triangles : 0),' +
+          ' fps: p.fps || 0, dpr: p.dpr || 0, crowd: p.crowd || 0, quality: p.quality || "" };'
         ).catch(() => null);
         const sharp = sharpness(file);
         report.shots.push(Object.assign({ vp, id: shot.id, file: file, sharpness: sharp }, info || {}));

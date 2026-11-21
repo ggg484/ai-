@@ -3,8 +3,70 @@
 // 正式资产替换点仍是 assets/textures/ 与 docs/ART-PIPELINE.md。
 
 import * as THREE from '../../vendor/three.module.js';
+import { PALETTE, surfaceMaterial, flatMaterial } from '../render/roblox.js';
 
 const cache = new Map();
+
+/* ------------------------------------------------------------------ */
+/* 卡通表层：结构件走哑光纯色（无凸点、无积木棱角）                      */
+/* ------------------------------------------------------------------ */
+
+// 需要颗粒感的表面（大面积墙、地、木）
+const RBX_SURF = {
+  sand: PALETTE.base,          // 草地底板
+  plaster: PALETTE.wall,       // 米黄墙
+  sandstone: PALETTE.wallDark, // 墙裙/装饰
+  brick: PALETTE.wallDark,     // 原先的砖面 → 干净的深米黄
+  concrete: PALETTE.path,      // 混凝土 / 石路
+  marble: PALETTE.frame,       // 大厅石材 → 暖白
+  fabric: PALETTE.roof,        // 布篷 → 红
+  wood: PALETTE.door           // 木门 / 木箱
+};
+
+// 纯色零件（金属、屋顶）
+const RBX_FLAT = {
+  metal: PALETTE.metal,
+  darkmetal: PALETTE.dark,
+  gold: PALETTE.gold,
+  roof: PALETTE.roof
+};
+
+function robloxMaterial(kind, opts) {
+  const surf = RBX_SURF[kind];
+  const flat = RBX_FLAT[kind];
+  const baseHex = surf != null ? surf : flat;
+  const key = 'rbx:' + kind + ':' + (opts.color || '') + ':' + (opts.vertexColors ? 'vc' : '') +
+    ':' + (opts.opacity != null ? opts.opacity : 1) + ':' + (opts.side != null ? opts.side : 0) +
+    ':' + (opts.repeatX || '') + 'x' + (opts.repeatY || '');
+  if (cache.has(key)) return cache.get(key);
+
+  let m;
+  if (surf != null) {
+    m = surfaceMaterial(baseHex, {
+      vertexColors: opts.vertexColors,
+      opacity: opts.opacity,
+      side: opts.side
+    });
+    if (opts.color != null) {
+      // 带颜色的变体必须复制一份，避免把缓存里的共享材质改花
+      m = m.clone();
+      m.color.multiply(new THREE.Color(opts.color));
+    }
+  } else {
+    m = flatMaterial(baseHex, { vertexColors: opts.vertexColors, side: opts.side });
+    if (opts.color != null) {
+      m = m.clone();
+      m.color.multiply(new THREE.Color(opts.color));
+    }
+    if (opts.opacity != null && opts.opacity < 1) {
+      m = m.clone();
+      m.transparent = true;
+      m.opacity = opts.opacity;
+    }
+  }
+  cache.set(key, m);
+  return m;
+}
 
 /* ------------------------------------------------------------------ */
 /* CC0 扫描材质（ambientCG）                                            */
@@ -715,6 +777,9 @@ function textures(kind, repeat) {
 
 export function material(kind, opts) {
   opts = opts || {};
+  // 结构件统一走卡通哑光/纯色材质；扫描贴图不再参与。
+  if (RBX_SURF[kind] != null || RBX_FLAT[kind] != null) return robloxMaterial(kind, opts);
+
   const base = MATS[kind] || MATS.concrete;
   const repeat = opts.repeat || base.repeat;
   const key = 'mat:' + kind + ':' + repeat + ':' + (opts.color || '') + ':' + (opts.roughness || '') +

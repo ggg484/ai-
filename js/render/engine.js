@@ -2,11 +2,13 @@
 // 目标：手机 WebView 稳 60；低端 30。所有画质开关都在这里。
 
 import * as THREE from '../../vendor/three.module.js';
+import { normalizeLighting } from '../world/lighting.js';
 
 const SKY_VERT = `
 varying vec3 vDir;
 void main() {
-  vDir = (modelMatrix * vec4(position, 1.0)).xyz;
+  // 天空球跟随相机移动，方向必须取局部坐标（球心即相机），不能用世界坐标
+  vDir = position;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -45,22 +47,20 @@ float fbm(vec2 p) {
 void main() {
   vec3 d = normalize(vDir);
   float h = d.y;
-  vec3 col = mix(horizon, zenith, smoothstep(0.0, 0.6, h));
-  col = mix(ground, col, smoothstep(-0.18, 0.02, h));
-  // 沙尘薄云：高空气团 + 地平线霾
-  vec2 uv = d.xz / max(0.12, d.y + 0.18);
-  float c = fbm(uv * 1.25 + vec2(4.2, 2.7));
-  float cloud = smoothstep(0.52, 0.78, c) * smoothstep(0.02, 0.24, h) * cloudiness;
-  float c2 = fbm(uv * 3.2 + vec2(8.1, 1.7));
-  float cloud2 = smoothstep(0.56, 0.8, c2) * smoothstep(0.05, 0.3, h) * cloudiness;
-  col = mix(col, vec3(0.96, 0.93, 0.86), cloud * 0.45 + cloud2 * 0.18);
-  float haze = smoothstep(0.28, -0.02, h);
-  col = mix(col, vec3(0.80, 0.70, 0.55), haze * 0.22);
+  vec3 col = mix(horizon, zenith, smoothstep(0.0, 0.72, h));
+  col = mix(ground, col, smoothstep(-0.12, 0.01, h));
+  // 卡通云只在较高仰角出现：地平线附近 uv 尺度极大，会把云糊成一片白雾
+  vec2 uv = d.xz / max(0.14, d.y + 0.20);
+  float c = fbm(uv * 1.1 + vec2(4.2, 2.7));
+  float cloud = smoothstep(0.54, 0.72, c) * smoothstep(0.17, 0.40, h) * cloudiness;
+  col = mix(col, vec3(1.0, 1.0, 1.0), cloud * 0.92);
+  float haze = smoothstep(0.14, -0.02, h);
+  col = mix(col, mix(horizon, vec3(1.0), 0.32), haze * 0.24);
   float sun = max(dot(d, normalize(sunDir)), 0.0);
-  col += vec3(1.0, 0.86, 0.62) * pow(sun, 220.0) * 0.9;
-  col += vec3(1.0, 0.72, 0.45) * pow(sun, 12.0) * 0.10;
+  col += vec3(1.0, 0.90, 0.70) * pow(sun, 220.0) * 0.7;
+  col += vec3(1.0, 0.82, 0.58) * pow(sun, 12.0) * 0.08;
   gl_FragColor = vec4(col, 1.0);
-  #include <tonemapping_fragment>
+  // 天空不参与色调映射：ACES 会把高亮天空压成灰白，卡通风格需要干净的天空色
   #include <colorspace_fragment>
 }`;
 
@@ -130,7 +130,9 @@ export class Engine {
     this.device = detectDevice();
     this.isMobile = this.device.mobile;
     this.quality = this.device.quality;
-    this.renderScale = this.isMobile ? 0.9 : 1;
+    // 分辨率恒定：永远使用设备原生像素比，不随画质档/帧率降采样。
+    // 画质档只影响阴影、云量等效果，不再影响清晰度。
+    this.renderScale = 1;
     this.mood = 'match';
     this.renderer = new THREE.WebGLRenderer({
       canvas: canvas,
@@ -166,17 +168,20 @@ export class Engine {
       depthWrite: false,
       fog: false,
       uniforms: {
-        zenith: { value: new THREE.Color(0x7fa8d6) },
-        horizon: { value: new THREE.Color(0xe8d4ae) },
-        ground: { value: new THREE.Color(0xa8855c) },
+        zenith: { value: new THREE.Color(0x63b3e6) },
+        horizon: { value: new THREE.Color(0xcfeaf8) },
+        ground: { value: new THREE.Color(0x7cbf68) },
         sunDir: { value: new THREE.Vector3(0.55, 0.62, 0.45) },
-        cloudiness: { value: 0.55 }
+        cloudiness: { value: 0.8 }
       },
       vertexShader: SKY_VERT,
       fragmentShader: SKY_FRAG
     });
     const sky = new THREE.Mesh(geo, this.skyMat);
     sky.frustumCulled = false;
+    // 天空球每帧跟随相机：否则相机远离场景中心时，球体远端会越过远裁剪面，
+    // 在画面里漏出一块纯黑的「拱形」缺口（全景机位尤其明显）。
+    this.sky = sky;
     this.scene.add(sky);
   }
 
@@ -223,43 +228,45 @@ export class Engine {
     }
   }
 
-  /** 'match' 沙漠外场 / 'lobby' 室内大厅：换一套光与雾。 */
+  /** 'match' 户外底板 / 'lobby' 室内大厅：换一套光与雾（Roblox 版更亮更平）。 */
   setMood(mood) {
     this.mood = mood;
     if (mood === 'lobby') {
-      this.scene.fog.color.setHex(0x8a7a62);
-      this.scene.fog.near = 26;
-      this.scene.fog.far = 105;
-      this.skyMat.uniforms.zenith.value.setHex(0x8fb2d9);
-      this.skyMat.uniforms.horizon.value.setHex(0xdcc9a8);
-      this.skyMat.uniforms.ground.value.setHex(0x8a7558);
-      this.skyMat.uniforms.sunDir.value.set(0.45, 0.78, 0.3);
-      this.sun.color.setHex(0xffe2b0);
-      this.sun.intensity = 2.05;
-      this.sun.position.set(34, 58, 18);
-      this.hemi.color.setHex(0xbdd4ea);
-      this.hemi.groundColor.setHex(0xc9a87c);
-      this.hemi.intensity = 0.58;
-      this.fill.color.setHex(0x9fb8d8);
-      this.fill.intensity = 0.45;
-      this.renderer.toneMappingExposure = 0.82;
-    } else {
-      this.scene.fog.color.setHex(0xd8c6a4);
+      this.scene.fog.color.setHex(0xcfe8f5);
       this.scene.fog.near = 46;
-      this.scene.fog.far = 130;
-      this.skyMat.uniforms.zenith.value.setHex(0x7fa8d6);
-      this.skyMat.uniforms.horizon.value.setHex(0xe8d4ae);
-      this.skyMat.uniforms.ground.value.setHex(0xa8855c);
+      this.scene.fog.far = 190;
+      this.skyMat.uniforms.zenith.value.setHex(0x74bceb);
+      this.skyMat.uniforms.horizon.value.setHex(0xcdecfa);
+      this.skyMat.uniforms.ground.value.setHex(0x7cbf68);
+      this.skyMat.uniforms.sunDir.value.set(0.45, 0.78, 0.3);
+      this.skyMat.uniforms.cloudiness.value = 0.45;
+      this.sun.color.setHex(0xfff2d6);
+      this.sun.intensity = 1.9;
+      this.sun.position.set(34, 58, 18);
+      this.hemi.color.setHex(0xe6f4ff);
+      this.hemi.groundColor.setHex(0xb0a58c);
+      this.hemi.intensity = 1.05;
+      this.fill.color.setHex(0xbfd8f0);
+      this.fill.intensity = 0.5;
+      this.renderer.toneMappingExposure = 1.0;
+    } else {
+      this.scene.fog.color.setHex(0xbfe4f5);
+      this.scene.fog.near = 62;
+      this.scene.fog.far = 210;
+      this.skyMat.uniforms.zenith.value.setHex(0x4aa8e0);
+      this.skyMat.uniforms.horizon.value.setHex(0xc2e6fa);
+      this.skyMat.uniforms.ground.value.setHex(0x7cbf68);
       this.skyMat.uniforms.sunDir.value.set(0.55, 0.62, 0.45);
-      this.sun.color.setHex(0xfff0d2);
-      this.sun.intensity = 3.0;
+      this.skyMat.uniforms.cloudiness.value = 0.55;
+      this.sun.color.setHex(0xfff6e2);
+      this.sun.intensity = 2.1;
       this.sun.position.set(38, 52, 22);
-      this.hemi.color.setHex(0xa9c7e8);
-      this.hemi.groundColor.setHex(0xc9a87c);
-      this.hemi.intensity = 0.42;
-      this.fill.color.setHex(0x9fb8d8);
-      this.fill.intensity = 0.24;
-      this.renderer.toneMappingExposure = 0.88;
+      this.hemi.color.setHex(0xdcf0ff);
+      this.hemi.groundColor.setHex(0xb0a58c);
+      this.hemi.intensity = 1.05;
+      this.fill.color.setHex(0xbfd8f0);
+      this.fill.intensity = 0.3;
+      this.renderer.toneMappingExposure = 1.02;
     }
   }
 
@@ -267,15 +274,18 @@ export class Engine {
     this.quality = q;
     const m = this.isMobile;
     const caps = {
-      low: { dpr: 1, shadows: false },
-      medium: { dpr: m ? 1.25 : 1.5, shadows: !m },
-      high: { dpr: m ? 1.5 : 2, shadows: !m }
+      low: { shadows: false },
+      medium: { shadows: !m },
+      high: { shadows: !m }
     };
     const cap = caps[q] || caps.medium;
-    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, cap.dpr);
-    if (q === 'low') this.renderScale = 1;
+    // 所有档位都锁在设备原生分辨率（上限 3，避免 4K 屏显存爆炸）。
+    // 用户要求：宁可降特效，也不能降分辨率把画面糊掉。
+    const dpr = window.devicePixelRatio || 1;
+    this.basePixelRatio = Math.max(1, Math.min(3, dpr));
+    this.renderScale = 1;
     if (this.skyMat) this.skyMat.uniforms.cloudiness.value = q === 'low' ? 0.3 : 0.55;
-    this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
+    this.renderer.setPixelRatio(this.basePixelRatio);
     const noShadows = /[?&]shadows=0/.test(location.search);
     this.renderer.shadowMap.enabled = cap.shadows && !noShadows;
     this.sun.castShadow = cap.shadows && !noShadows;
@@ -290,14 +300,94 @@ export class Engine {
     this.resize();
   }
 
-  /** 动态分辨率：0.6–1.0，由主循环根据实测帧率调节。 */
-  setRenderScale(scale) {
-    const s = Math.max(0.6, Math.min(1, scale));
-    if (Math.abs(s - this.renderScale) < 0.01) return;
-    this.renderScale = s;
-    if (!this.basePixelRatio) this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
-    this.renderer.setPixelRatio(this.basePixelRatio * s);
-    this.resize();
+  /**
+   * 应用一套光影数据（太阳/天光/补光/雾/天空/曝光）。
+   * 光影工坊实时调用；对局启动时应用 assets/lighting.json。
+   */
+  applyLighting(input) {
+    const l = normalizeLighting(input);
+    this.lighting = l;
+    const az = (l.sun.azimuth * Math.PI) / 180;
+    const el = (l.sun.elevation * Math.PI) / 180;
+    const r = 92;
+    const sx = r * Math.cos(el) * Math.sin(az);
+    const sy = r * Math.sin(el);
+    const sz = r * Math.cos(el) * Math.cos(az);
+    this.sun.position.set(sx, sy, sz);
+    this.sun.color.set(l.sun.color);
+    this.sun.intensity = l.sun.intensity;
+    this.sun.target.position.set(0, 0, 0);
+    this.sun.target.updateMatrixWorld();
+
+    this.hemi.color.set(l.hemi.sky);
+    this.hemi.groundColor.set(l.hemi.ground);
+    this.hemi.intensity = l.hemi.intensity;
+
+    this.fill.color.set(l.fill.color);
+    this.fill.intensity = l.fill.intensity;
+
+    if (this.scene.fog) {
+      this.scene.fog.color.set(l.fog.color);
+      this.scene.fog.near = l.fog.near;
+      this.scene.fog.far = l.fog.far;
+    }
+
+    if (this.skyMat) {
+      const u = this.skyMat.uniforms;
+      u.zenith.value.set(l.sky.zenith);
+      u.horizon.value.set(l.sky.horizon);
+      u.ground.value.set(l.sky.ground);
+      u.cloudiness.value = l.sky.cloudiness;
+      u.sunDir.value.set(sx, sy, sz).normalize();
+    }
+
+    this.renderer.toneMappingExposure = l.exposure;
+    return l;
+  }
+
+  /** 把当前引擎光照读成可保存的数据，供工坊「读取当前」使用。 */
+  captureLighting() {
+    const p = this.sun.position;
+    const r = Math.max(0.001, p.length());
+    const el = (Math.asin(Math.max(-1, Math.min(1, p.y / r))) * 180) / Math.PI;
+    let az = (Math.atan2(p.x, p.z) * 180) / Math.PI;
+    if (az < 0) az += 360;
+    const u = this.skyMat ? this.skyMat.uniforms : null;
+    return normalizeLighting({
+      sun: {
+        azimuth: az,
+        elevation: Math.max(1, el),
+        color: '#' + this.sun.color.getHexString(),
+        intensity: this.sun.intensity
+      },
+      hemi: {
+        sky: '#' + this.hemi.color.getHexString(),
+        ground: '#' + this.hemi.groundColor.getHexString(),
+        intensity: this.hemi.intensity
+      },
+      fill: {
+        color: '#' + this.fill.color.getHexString(),
+        intensity: this.fill.intensity
+      },
+      fog: this.scene.fog ? {
+        color: '#' + this.scene.fog.color.getHexString(),
+        near: this.scene.fog.near,
+        far: this.scene.fog.far
+      } : undefined,
+      sky: u ? {
+        zenith: '#' + u.zenith.value.getHexString(),
+        horizon: '#' + u.horizon.value.getHexString(),
+        ground: '#' + u.ground.value.getHexString(),
+        cloudiness: u.cloudiness.value
+      } : undefined,
+      exposure: this.renderer.toneMappingExposure
+    });
+  }
+
+  /** 已停用动态分辨率：分辨率始终是原生档，任何调用都不会降清晰度。 */
+  setRenderScale() {
+    this.renderScale = 1;
+    if (this.basePixelRatio) this.renderer.setPixelRatio(this.basePixelRatio);
   }
 
   resize() {
@@ -309,6 +399,8 @@ export class Engine {
   }
 
   render() {
+    // 天空球跟着相机走，保证永远在远裁剪面内，也不会出现地平线缺口。
+    if (this.sky) this.sky.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);
   }
 }

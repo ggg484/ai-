@@ -4,6 +4,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { buildWeaponModel } from './weapon-models.js';
 import { applySkin } from './skin-material.js';
+import { normalizeWeaponRig, DEFAULT_WEAPON_RIG } from './rig.js';
 
 function flashTexture() {
   const c = document.createElement('canvas');
@@ -23,11 +24,11 @@ function flashTexture() {
 const WEAPON_IDS = ['ak', 'glock', 'knife'];
 
 export class Viewmodel {
-  constructor(camera) {
+  constructor(camera, rig) {
     this.root = new THREE.Group();
     this.root.name = 'viewmodel';
     this.root.renderOrder = 1000;
-    this.root.scale.setScalar(0.72);
+    this.rig = normalizeWeaponRig(rig || DEFAULT_WEAPON_RIG);
     camera.add(this.root);
 
     // 枪械专用补光，避免在阴影里变成黑块；距离很短，不影响场景。
@@ -77,19 +78,21 @@ export class Viewmodel {
     Object.keys(this.guns).forEach((k) => { this.guns[k].visible = (k === id); });
     this.current = id;
     this.raise = 0.28;
-    if (id === 'knife') {
-      this.basePos.set(0.28, -0.25, -0.46);
-      this.baseRot.set(0.12, -0.18, -0.08);
-    } else if (id === 'glock') {
-      this.basePos.set(0.30, -0.26, -0.58);
-      this.baseRot.set(0.03, 0.07, -0.06);
-    } else {
-      this.basePos.set(0.36, -0.29, -0.78);
-      this.baseRot.set(0.028, 0.06, -0.05);
-    }
-    this.root.position.copy(this.basePos);
+    this.applyRig(this.rig);
     const entry = this.skins[id];
     if (entry) applySkin(this.guns[id], entry.skin, entry.variant);
+  }
+
+  /** 应用一套武器挂点参数（模型工坊实时预览 / 启动读取静态文件）。 */
+  applyRig(rig) {
+    this.rig = normalizeWeaponRig(rig || this.rig);
+    const id = this.current || 'ak';
+    const r = this.rig.weapons[id] || this.rig.weapons.ak;
+    this.root.scale.setScalar(r.scale);
+    this.basePos.fromArray(r.pos);
+    this.baseRot.fromArray(r.rot);
+    this.root.position.copy(this.basePos);
+    this.root.rotation.set(this.baseRot.x, this.baseRot.y, this.baseRot.z);
   }
 
   /** 装备皮肤；传 null 为原厂。 */

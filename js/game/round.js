@@ -87,17 +87,26 @@ export class Round {
       this.timer -= dt;
       this._plantLogic(dt);
       if (this.phase !== PHASE.LIVE) return;
-      if (!player.alive) { this.end(false, '你已阵亡'); return; }
-      if (g.bots.every((b) => !b.alive)) { this.end(true, '敌人已全部消灭'); return; }
+      const tAlive = (player.alive ? 1 : 0) + g.allyBots.filter((b) => b.alive).length;
+      const ctAlive = g.enemyBots.filter((b) => b.alive).length;
+      if (ctAlive === 0) { this.end(true, '敌人已全部消灭'); return; }
+      if (tAlive === 0) { this.end(false, '我方已全部阵亡'); return; }
+      if (!player.alive) {
+        g.hud.setPhase('观战中');
+        g.hud.setObjective('队友仍在战斗');
+      }
       if (this.timer <= 0) { this.end(false, '时间到，炸弹未安放'); return; }
     }
 
     if (this.phase === PHASE.PLANTED) {
       this.timer -= dt;
       this._bombVisual(dt);
-      if (!player.alive) { this.end(false, '你已阵亡，炸弹无人看守'); return; }
       if (this.timer <= 0) { this._explode(); this.end(true, '炸弹已引爆'); return; }
       g.hud.setBombTimer(this.timer);
+      if (!player.alive) {
+        const allyAlive = g.allyBots.some((b) => b.alive);
+        g.hud.setPhase(allyAlive ? '观战中' : '炸弹倒计时');
+      }
     }
   }
 

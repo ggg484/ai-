@@ -68,9 +68,9 @@ export class Player {
   update(dt, input, world) {
     if (!this.alive) return;
 
-    // 视角
+    // 视角：屏幕右滑 = 向右转（相机朝 -Z 时 yaw 需要减小）
     const look = input.consumeLook();
-    this.yaw += look.dx;
+    this.yaw -= look.dx;
     this.pitch -= look.dy;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
 
@@ -92,10 +92,10 @@ export class Player {
       this.height += Math.max(-5.0 * dt, targetH - this.height);
     }
 
-    // 期望方向
+    // 期望方向：forward=(sin yaw, cos yaw)，right=(-cos yaw, sin yaw)
     const ax = input.axis();
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
-    const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    const rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw);
     let wx = fx * ax.y + rx * ax.x;
     let wz = fz * ax.y + rz * ax.x;
     const wl = Math.hypot(wx, wz);

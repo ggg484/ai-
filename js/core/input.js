@@ -92,18 +92,32 @@ export class Input {
   _bindTouch() {
     const zone = document.getElementById('stick-zone');
     const knob = document.getElementById('stick-knob');
+    const base = zone ? zone.querySelector('.stick-base') : null;
     if (zone && knob) {
-      const R = 46;
+      // 浮动摇杆：按住左半屏任意位置，摇杆基座出现在手指下，半径 58px。
+      const R = 58;
+      const origin = { x: 0, y: 0 };
       const start = (e) => {
         if (!this.enabled) return;
         this.stick.id = e.pointerId;
         zone.setPointerCapture(e.pointerId);
-        this._moveStick(e, knob, R);
+        const rect = zone.getBoundingClientRect();
+        origin.x = e.clientX;
+        origin.y = e.clientY;
+        if (base) {
+          base.style.left = (e.clientX - rect.left - 75) + 'px';
+          base.style.top = (e.clientY - rect.top - 75) + 'px';
+          base.style.bottom = 'auto';
+          base.classList.add('on');
+        }
+        this.stick.x = 0;
+        this.stick.y = 0;
+        knob.style.transform = 'translate(-50%,-50%)';
         e.preventDefault();
       };
       const move = (e) => {
         if (this.stick.id !== e.pointerId) return;
-        this._moveStick(e, knob, R);
+        this._moveStick(e, knob, R, origin);
         e.preventDefault();
       };
       const end = (e) => {
@@ -112,6 +126,12 @@ export class Input {
         this.stick.x = 0;
         this.stick.y = 0;
         knob.style.transform = 'translate(-50%,-50%)';
+        if (base) {
+          base.classList.remove('on');
+          base.style.left = '';
+          base.style.top = '';
+          base.style.bottom = '';
+        }
         e.preventDefault();
       };
       zone.addEventListener('pointerdown', start);
@@ -170,22 +190,33 @@ export class Input {
     });
   }
 
-  _moveStick(e, knob, R) {
-    const rect = document.getElementById('stick-zone').getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    let dx = e.clientX - cx;
-    let dy = e.clientY - cy;
+  _moveStick(e, knob, R, origin) {
+    let dx = e.clientX - origin.x;
+    let dy = e.clientY - origin.y;
     const len = Math.hypot(dx, dy) || 1;
     if (len > R) { dx = dx / len * R; dy = dy / len * R; }
-    this.stick.x = dx / R;
-    this.stick.y = dy / R;
+    let nx = dx / R;
+    let ny = dy / R;
+    // 8% 死区，避免松手时角色自己走；死区外重新映射到 0–1，保证推杆立刻响应。
+    const mag = Math.hypot(nx, ny);
+    if (mag < 0.08) { nx = 0; ny = 0; }
+    else {
+      const k = (mag - 0.08) / 0.92 / mag;
+      nx *= k;
+      ny *= k;
+    }
+    this.stick.x = nx;
+    this.stick.y = ny;
     knob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
   }
 
   requestLock() {
     if (!this.canvas.requestPointerLock) return;
-    try { this.canvas.requestPointerLock(); } catch (e) {}
+    try {
+      // Chrome 新版本返回 Promise，没有用户手势时会 reject，必须吃掉这个 rejection。
+      const p = this.canvas.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) {}
   }
 
   exitLock() {

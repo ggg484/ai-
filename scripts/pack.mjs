@@ -44,7 +44,10 @@ cpSync(join(ROOT, 'mobile-perf.js'), join(DIST, 'mobile-perf.js'));
 copyDir(join(ROOT, 'css'), join(DIST, 'css'));
 copyDir(join(ROOT, 'js'), join(DIST, 'js'));
 mkdirSync(join(DIST, 'vendor'), { recursive: true });
-cpSync(join(ROOT, 'vendor', 'three.module.js'), join(DIST, 'vendor', 'three.module.js'));
+for (const f of ['three.module.js', 'GLTFLoader.js', 'THREE-LICENSE.txt']) {
+  cpSync(join(ROOT, 'vendor', f), join(DIST, 'vendor', f));
+}
+copyDir(join(ROOT, 'vendor', 'utils'), join(DIST, 'vendor', 'utils'));
 copyDir(join(ROOT, 'assets'), join(DIST, 'assets'));
 
 // ---- 自检 ----

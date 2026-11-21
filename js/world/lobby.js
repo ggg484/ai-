@@ -8,7 +8,7 @@ import { GeoBatch, mergeGeos } from './geo-utils.js';
 import { buildDisplayWeapon, buildProxyWeapon } from '../render/weapon-models.js';
 import { applySkin } from '../render/skin-material.js';
 import { SKIN_MAP, defaultVariant, wearLabel } from '../config/skins.js';
-import { buildHero, makeNameplate } from '../render/character.js';
+import { makeNameplate } from '../render/character.js';
 import { buildPropModel, mergePropsByMaterial } from '../render/prop-models.js';
 import { HERO_SHOWCASE, tierById, LOBBY_INTERACTIONS, LOBBY_TELEPORTS } from '../config/lobby.js';
 
@@ -575,28 +575,31 @@ export function buildLobby(scene) {
     beam.translate(h.x, 2.42, h.z);
     heroBeamGeos.push(beam);
 
-    const hero = buildHero(h);
+    // 展位不再放占位人物：只保留浮空武器、光柱与铭牌。
+    const hero = new THREE.Group();
     hero.position.set(h.x, 0.36, h.z);
     hero.rotation.y = h.yaw;
     root.add(hero);
 
-    // 主角手持展品
     const w = buildProxyWeapon(h.weapon);
     w.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     w.userData.weaponId = h.weapon;
     applySkin(w, SKIN_MAP[h.skin], h.variant || defaultVariant(SKIN_MAP[h.skin]));
     if (h.weapon === 'knife') {
-      w.scale.setScalar(0.85);
-      w.position.set(0.32, 0.95, -0.25);
+      w.scale.setScalar(0.95);
+      w.position.set(0, 1.08, 0);
       w.rotation.set(0.2, -0.4, -1.1);
     } else {
-      w.scale.setScalar(0.72);
-      w.position.set(0.3, 0.95, -0.3);
-      w.rotation.set(0, -0.15, 0.12);
+      w.scale.setScalar(0.95);
+      w.position.set(0, 1.08, 0);
+      w.rotation.set(0, -0.35, 0.12);
     }
     hero.add(w);
+    animated.push({ obj: w, bob: 0.022 });
 
-    const plate = makeNameplate(tier.name, h.name, h.subtitle + ' · ' + h.collection + ' 件', tier.color);
+    const skinCfg = SKIN_MAP[h.skin];
+    const plate = makeNameplate(tier.name, skinCfg ? skinCfg.name : h.weapon.toUpperCase(),
+      h.weapon.toUpperCase() + ' · 浮空展位', tier.color);
     plate.position.set(h.x, 2.75, h.z);
     root.add(plate);
     animated.push({ obj: plate, bob: 0.03 });

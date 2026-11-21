@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "sun": {
+    "azimuth": 246,
+    "elevation": 24,
+    "color": "#ffd1a1",
+    "intensity": 2.75
+  },
+  "hemi": {
+    "sky": "#a8c6e8",
+    "ground": "#c7a47a",
+    "intensity": 0.74
+  },
+  "fill": {
+    "color": "#8fb0d8",
+    "intensity": 0.4
+  },
+  "fog": {
+    "color": "#e2c6a6",
+    "near": 58,
+    "far": 235
+  },
+  "sky": {
+    "zenith": "#4a96cc",
+    "horizon": "#f6d7b0",
+    "ground": "#7ebf68",
+    "cloudiness": 0.55
+  },
+  "exposure": 1.06
+}

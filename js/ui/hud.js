@@ -19,6 +19,7 @@ export class Hud {
       plantBar: $('plant-bar'), plantFill: $('plant-fill'), plantText: $('plant-text'),
       bombStatus: $('bomb-status'), bombTimer: $('bomb-timer'),
       radar: $('radar'),
+      roster: $('roster'), scoreboard: $('scoreboard'), sbCols: $('sb-cols'),
       start: $('start'), buy: $('buy'), settings: $('settings'), pause: $('pause'),
       roundEnd: $('round-end'), endTitle: $('end-title'), endSub: $('end-sub'),
       buyList: $('buy-list'), buyMoney: $('buy-money'),
@@ -200,6 +201,43 @@ export class Hud {
     this.el.buyMoney.textContent = '$ ' + money.toLocaleString('en-US');
   }
 
+  /** 顶部 5v5 存活条：每 0.1s 由 game 调用。 */
+  setRoster(tRows, ctRows) {
+    if (!this.el.roster) return;
+    const key = tRows.map((r) => r.alive ? 1 : 0).join('') + '|' + ctRows.map((r) => r.alive ? 1 : 0).join('');
+    if (key === this._rosterKey) return;
+    this._rosterKey = key;
+    const side = (rows, cls) => '<div class="rs-side ' + cls + '">' + rows.map((r) =>
+      '<i class="' + (r.alive ? 'on' : 'off') + '" title="' + r.name + '"></i>').join('') + '</div>';
+    this.el.roster.innerHTML =
+      '<span class="rs-tag t">T ' + tRows.filter((r) => r.alive).length + '</span>' +
+      side(tRows, 't') +
+      '<span class="rs-vs">VS</span>' +
+      side(ctRows, 'ct') +
+      '<span class="rs-tag ct">' + ctRows.filter((r) => r.alive).length + ' CT</span>';
+  }
+
+  /** 按住 Tab 的战术战报。 */
+  showScoreboard(on, data) {
+    const el = this.el.scoreboard;
+    if (!el) return;
+    el.classList.toggle('hidden', !on);
+    if (!on || !data || !this.el.sbCols) return;
+    const col = (title, rows, cls) => {
+      const sorted = rows.slice().sort((a, b) => (b.kills - a.kills) || (a.deaths - b.deaths));
+      return '<div class="sb-col ' + cls + '"><div class="sb-col-head"><b>' + title + '</b><span>' +
+        rows.filter((r) => r.alive).length + ' 存活</span></div>' +
+        sorted.map((r) =>
+          '<div class="sb-row' + (r.you ? ' you' : '') + (r.alive ? '' : ' dead') + '">' +
+          '<span class="sb-name">' + r.name + '</span>' +
+          '<span class="sb-k">' + r.kills + '</span>' +
+          '<span class="sb-d">' + r.deaths + '</span>' +
+          '<span class="sb-st">' + (r.alive ? '●' : '✕') + '</span>' +
+          '</div>').join('') + '</div>';
+    };
+    this.el.sbCols.innerHTML = col('T · 进攻方', data.t, 't') + col('CT · 防守方', data.ct, 'ct');
+  }
+
   drawRadar(map, player, bots, bomb) {
     const ctx = this.rctx;
     if (!ctx || !map) return;
@@ -244,15 +282,22 @@ export class Hud {
       ctx.fill();
     }
 
-    // 敌人：骨架版只显示 30m 内的
+    // 队友始终显示，敌人只显示 30m 内的（骨架版没有共享视野）
     bots.forEach((bt) => {
       if (!bt.alive) return;
+      const ally = bt.team === 't';
       const d = Math.hypot(bt.pos.x - player.position.x, bt.pos.z - player.position.z);
-      if (d > 30) return;
+      if (!ally && d > 30) return;
+      if (ally && d > 46) return;
       ctx.beginPath();
-      ctx.arc(px(bt.pos.x), pz(bt.pos.z), 2.6, 0, Math.PI * 2);
-      ctx.fillStyle = '#e05a3a';
+      ctx.arc(px(bt.pos.x), pz(bt.pos.z), ally ? 2.8 : 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = ally ? '#69c6a8' : '#e05a3a';
       ctx.fill();
+      if (ally) {
+        ctx.strokeStyle = 'rgba(105,198,168,.45)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     });
 
     // 玩家三角

@@ -2,14 +2,18 @@
 // 目标不是「AI」，而是让大厅在低 draw call 下同时出现几百人，并且一眼能看出收藏等级。
 
 import * as THREE from '../../vendor/three.module.js';
-import { crowdGeometries } from '../render/character.js';
-import { material } from '../world/textures.js';
+import { crowdGeometries, characterCloth, AVATAR } from '../render/character.js';
 
+// 人群配色：Roblox 经典亮色衬衫。前三个是蓝队（CT），后三个是橙队（T）。
 const PALETTE = [
-  [0.62, 0.60, 0.53], [0.34, 0.44, 0.55], [0.5, 0.47, 0.4],
-  [0.28, 0.3, 0.28], [0.68, 0.55, 0.44], [0.42, 0.24, 0.24],
-  [0.55, 0.5, 0.42], [0.26, 0.34, 0.38], [0.46, 0.38, 0.48],
-  [0.58, 0.52, 0.34]
+  [0.05, 0.41, 0.67], [0.13, 0.48, 0.74], [0.02, 0.32, 0.55],   // CT 蓝
+  [0.77, 0.38, 0.10], [0.85, 0.47, 0.14], [0.65, 0.30, 0.07]    // T 橙
+];
+const SKIN_TONES = [
+  [0.91, 0.71, 0.54], [0.82, 0.62, 0.45], [0.70, 0.50, 0.35], [0.55, 0.38, 0.26]
+];
+const PANT_TONES = [
+  [0.16, 0.19, 0.24], [0.22, 0.24, 0.28], [0.13, 0.14, 0.16], [0.28, 0.24, 0.20]
 ];
 
 const WALK_NODES = [
@@ -111,20 +115,18 @@ export class Crowd {
     this.animateIdle = !this.mobile && q !== 'low';
 
     const geo = crowdGeometries(true);
-    const fabric = material('fabric', { repeat: 3, roughness: 0.9 });
+    const cloth = characterCloth();
     if (this.mobile || q === 'low') {
       // 中端手机：Lambert 比 Standard 便宜一大截，远看几乎无差别
       this.outfitMat = new THREE.MeshLambertMaterial({
-        map: fabric.map, vertexColors: true, color: 0xffffff, emissive: 0x3a342c
+        map: cloth, vertexColors: true, color: 0xffffff, emissive: 0x3a342c
       });
       this.skinMat = new THREE.MeshLambertMaterial({ vertexColors: true, color: 0xffffff, emissive: 0x3a2a20 });
     } else {
-      this.outfitMat = fabric.clone();
-      this.outfitMat.vertexColors = true;
-      this.outfitMat.metalness = 0.03;
-      this.outfitMat.roughness = 0.9;
-      this.outfitMat.emissive = new THREE.Color(0x18140f);
-      this.outfitMat.emissiveIntensity = 0.5;
+      this.outfitMat = new THREE.MeshStandardMaterial({
+        map: cloth, vertexColors: true, metalness: 0.03, roughness: 0.9,
+        emissive: new THREE.Color(0x18140f), emissiveIntensity: 0.5
+      });
       this.skinMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.02 });
       this.skinMat.emissive = new THREE.Color(0x20160f);
       this.skinMat.emissiveIntensity = 0.45;
@@ -163,6 +165,8 @@ export class Crowd {
       const z = node[1] + (Math.random() - 0.5) * 6;
       if (isBlocked(x, z)) continue;
       if (Math.hypot(x, z - 19) < 3.5) continue;
+      // 玩家出生点前留出空地，避免开局被人挡脸
+      if (Math.hypot(x, z - 17) < 3.6) continue;
       const tierRoll = Math.random();
       walkers.push({
         x: x, z: z, y: 0, yaw: Math.random() * Math.PI * 2, speed: 0.65 + Math.random() * 0.8,
@@ -383,10 +387,14 @@ export class Crowd {
       else if (m.tier === 2) col = [0.5, 0.4, 0.62];
       c.setRGB(col[0], col[1], col[2]);
       this.torso.setColorAt(i, c);
-      this.arms.setColorAt(i * 2, c);
-      this.arms.setColorAt(i * 2 + 1, c);
-      this.legs.setColorAt(i * 2, c);
-      this.legs.setColorAt(i * 2 + 1, c);
+      const skin = SKIN_TONES[i % SKIN_TONES.length];
+      const sc = new THREE.Color(skin[0], skin[1], skin[2]);
+      this.arms.setColorAt(i * 2, sc);
+      this.arms.setColorAt(i * 2 + 1, sc);
+      const pant = PANT_TONES[i % PANT_TONES.length];
+      const pc = new THREE.Color(pant[0], pant[1], pant[2]);
+      this.legs.setColorAt(i * 2, pc);
+      this.legs.setColorAt(i * 2 + 1, pc);
     });
     this.torso.instanceColor.needsUpdate = true;
     this.arms.instanceColor.needsUpdate = true;
@@ -403,10 +411,10 @@ export class Crowd {
       this.torso.setMatrixAt(i, this.tmpBody);
       if (m.helmet) this.headB.setMatrixAt(this.hIdxB[i], this.tmpBody);
       else this.headA.setMatrixAt(this.hIdxA[i], this.tmpBody);
-      this._writeLimb(this.arms, i * 2, this.tmpBody, -0.245, 1.43, 0, 0);
-      this._writeLimb(this.arms, i * 2 + 1, this.tmpBody, 0.245, 1.43, 0, 0);
-      this._writeLimb(this.legs, i * 2, this.tmpBody, -0.095, 0.95, 0, 0);
-      this._writeLimb(this.legs, i * 2 + 1, this.tmpBody, 0.095, 0.95, 0, 0);
+      this._writeLimb(this.arms, i * 2, this.tmpBody, -AVATAR.armX, AVATAR.shoulderY, 0, 0);
+      this._writeLimb(this.arms, i * 2 + 1, this.tmpBody, AVATAR.armX, AVATAR.shoulderY, 0, 0);
+      this._writeLimb(this.legs, i * 2, this.tmpBody, -AVATAR.legX, AVATAR.hipY, 0, 0);
+      this._writeLimb(this.legs, i * 2 + 1, this.tmpBody, AVATAR.legX, AVATAR.hipY, 0, 0);
       this._writeLimb(this.blob, i, this.tmpBody, 0, 0.02, 0, 0);
     });
     this.torso.instanceMatrix.needsUpdate = true;
@@ -496,10 +504,10 @@ export class Crowd {
       if (m.helmet) this.headB.setMatrixAt(this.hIdxB[i], this.tmpBody);
       else this.headA.setMatrixAt(this.hIdxA[i], this.tmpBody);
 
-      this._writeLimb(this.arms, i * 2, this.tmpBody, -0.245, 1.43, 0, armSwing);
-      this._writeLimb(this.arms, i * 2 + 1, this.tmpBody, 0.245, 1.43, 0, -armSwing);
-      this._writeLimb(this.legs, i * 2, this.tmpBody, -0.095, 0.95, 0, legSwing);
-      this._writeLimb(this.legs, i * 2 + 1, this.tmpBody, 0.095, 0.95, 0, -legSwing);
+      this._writeLimb(this.arms, i * 2, this.tmpBody, -AVATAR.armX, AVATAR.shoulderY, 0, armSwing);
+      this._writeLimb(this.arms, i * 2 + 1, this.tmpBody, AVATAR.armX, AVATAR.shoulderY, 0, -armSwing);
+      this._writeLimb(this.legs, i * 2, this.tmpBody, -AVATAR.legX, AVATAR.hipY, 0, legSwing);
+      this._writeLimb(this.legs, i * 2 + 1, this.tmpBody, AVATAR.legX, AVATAR.hipY, 0, -legSwing);
       this._writeLimb(this.blob, i, this.tmpBody, 0, 0.02, 0, 0);
     }
 

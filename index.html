@@ -49,6 +49,16 @@
     </div>
   </div>
 
+  <div class="roster" id="roster"></div>
+
+  <div class="scoreboard hidden" id="scoreboard">
+    <div class="sb-head">
+      <span class="sb-title">战术战报</span>
+      <span class="sb-hint">TAB 按住查看</span>
+    </div>
+    <div class="sb-cols" id="sb-cols"></div>
+  </div>
+
   <div class="killfeed" id="killfeed"></div>
   <div class="objective" id="objective">在 A / B 点安放炸弹</div>
 
@@ -60,6 +70,7 @@
 
   <div class="hud-bottom">
     <div class="vitals">
+      <div class="team-tag" id="team-tag"><b>T</b> 进攻方 · 沙城协议</div>
       <div class="bar hp"><span id="hp-fill"></span><b id="hp">100</b></div>
       <div class="bar armor"><span id="armor-fill"></span><b id="armor">0</b></div>
       <div class="money" id="money">$ 800</div>
@@ -266,7 +277,7 @@
       <button class="close" data-close="news">×</button>
     </div>
     <div class="news-body">
-      <p>下载即进入大厅，不再有传统开始页。大厅常驻数百名玩家与四个典藏展位。</p>
+      <p>下载即进入大厅，不再有传统开始页。大厅保持空场，没有真人时就只显示你自己，绝不用假人冒充在线。</p>
       <ul>
         <li>中央陈列柱：鎏金爪刀，可绕行检视。</li>
         <li>西侧藏品墙：步枪 / 手枪 / 刀具全量试穿。</li>
@@ -303,6 +314,7 @@
       </select>
     </label>
     <p class="tiny">设置通过平台私有存档保存，换设备可恢复。</p>
+    <p class="tiny">角色模型：Roblox-Bacon-Hair by Roblox（Sketchfab，CC-BY-4.0）。</p>
     <button class="primary" data-close="settings" type="button">完成</button>
     <button id="btn-exit-match" class="ghost-btn hidden" type="button">返回大厅</button>
   </div>
@@ -342,6 +354,9 @@
   </div>
 </div>
 
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "title": "沙城协议",
   "tagline": "5v5 战术爆破 · 军械大厅",
-  "desc": "下载即进入 3D 军械大厅：数百名玩家同场、藏品墙自由试穿枪皮刀皮、三条靶道自由练习，左右传送点进入经典爆破 / 快速爆破 / 手枪局与大厅活动。",
+  "desc": "下载即进入 3D 军械大厅：藏品墙自由试穿枪皮刀皮、三条靶道自由练习，左右传送点进入经典爆破 / 快速爆破 / 手枪局与大厅活动。黄金时刻光影下的 104×88 沙城地图，5v5 人机对战即开即玩。",
   "category": "shoot",
   "engine": "h5",
   "tags": [
@@ -20,5 +20,13 @@
   ],
   "coverKind": "palette",
   "coverPalette": "ember",
-  "buildEntry": "index.html"
+  "buildEntry": "index.html",
+  "buildPrefix": "builds/cd32ef605392fd5012e3c49a18829a41",
+  "buildSize": 2939430,
+  "bundleUrl": "https://builda-godot-play.poni.fun/cysj2/release/bundles/cd32ef605392fd5012e3c49a18829a41.zip",
+  "bundleMd5": "82c37b1992800fec3e98f4ddbe55e8e7",
+  "bundleVersion": "cd32ef605392fd5012e3c49a18829a41",
+  "bundleEntry": "index.html",
+  "bundleSize": 1658343,
+  "sdkVersion": "0.26.6"
 }

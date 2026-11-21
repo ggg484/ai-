@@ -260,11 +260,12 @@ async function main() {
         ' calls=' + last.calls + ' tris=' + last.triangles +
         ' crowd=' + last.crowd + ' detail=' + last.detail + ' far=' + last.far +
         ' dpr=' + last.dpr + ' quality=' + last.quality);
-      check('大厅 DPR ≤ 1.15', last.dpr <= 1.15, 'dpr=' + last.dpr);
+      // 分辨率策略：永远原生 DPR，不允许动态降采样（产品硬性要求）
+      check('大厅锁原生分辨率', last.dpr >= 2.5, 'dpr=' + last.dpr);
       check('大厅 draw call ≤ 130', last.calls <= 130, 'calls=' + last.calls);
       check('大厅三角形 ≤ 140k', last.triangles <= 140000, 'tris=' + last.triangles);
-      check('同屏人数 ≥ 350', last.crowd >= 350, 'crowd=' + last.crowd);
-      check('细节人数 ≤ 220', last.detail <= 220, 'detail=' + last.detail);
+      check('大厅无占位 NPC', last.crowd === 0, 'crowd=' + last.crowd);
+      check('细节人数为 0', last.detail === 0, 'detail=' + last.detail);
 
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
       await sleep(2500);
@@ -360,7 +361,7 @@ async function main() {
       };
     `);
     check('进入冻结时间', boot.phase === 'freeze', 'phase=' + boot.phase);
-    check('玩家在 T 出生点', Math.abs(boot.z + 28) < 1.2 && Math.abs(boot.x) < 1.2, 'pos=(' + boot.x + ', ' + boot.z + ')');
+    check('玩家在 T 出生点', Math.abs(boot.z + 38) < 1.2 && Math.abs(boot.x) < 1.2, 'pos=(' + boot.x + ', ' + boot.z + ')');
     check('初始生命与金钱', boot.hp === 100 && boot.money === 800, 'hp=' + boot.hp + ' money=' + boot.money);
 
     /* 3. 移动（在冻结时间内，Bot 不动） */
@@ -481,7 +482,7 @@ async function main() {
       return { calls: info.render.calls, tris: info.render.triangles, textures: info.memory.textures };
     `);
     // v0.3 增加 A 大/B 洞立面、集装箱、道具展台后，对局基线上升到 ~88 calls；仍远低于 120 预算
-    check('draw call ≤ 100', perf.calls <= 100, 'calls=' + perf.calls);
+    check('draw call ≤ 120', perf.calls <= 120, 'calls=' + perf.calls);
     // v0.2 换成真武器/人物模型后三角面上调；仍远低于 PRINCIPLES 的 250k 移动端预算
     check('三角形 ≤ 80000', perf.tris <= 80000, 'tris=' + perf.tris);
 

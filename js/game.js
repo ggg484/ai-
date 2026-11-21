@@ -4,8 +4,10 @@
 import * as THREE from '../../vendor/three.module.js';
 import { Engine } from './render/engine.js';
 import { buildMap } from './world/map.js';
+import { loadStoredEdits } from './world/map-edits.js';
 import { loadPhotoTextures } from './world/textures.js';
 import { refreshWeaponTextures } from './render/weapon-models.js';
+import { loadAvatarModel } from './render/avatar-glb.js';
 import { buildLobby } from './world/lobby.js';
 import { Player } from './player/controller.js';
 import { Weapon } from './player/weapon.js';
@@ -22,7 +24,6 @@ import { WEAPONS, ECONOMY } from './config/weapons.js';
 import { GAME_MODES, MODE_MAP } from './config/modes.js';
 import { defaultProfile, TIERS, tierById, LOBBY_FEED, LEADERBOARD } from './config/lobby.js';
 import { SKIN_MAP, defaultVariant, entryId, entryVariant } from './config/skins.js';
-import { Crowd } from './lobby/crowd.js';
 import { RangeSystem } from './lobby/range.js';
 
 const STEP = 1 / 64;
@@ -51,7 +52,7 @@ export class Game {
     this.hud = new Hud();
     this.input = new Input(canvas);
     this.player = new Player({ x: 0, y: 0, z: 0, yaw: 0 });
-    this.viewmodel = new Viewmodel(this.engine.camera);
+    this.viewmodel = new Viewmodel(this.engine.camera, window.__weaponRig);
     this.photo = new PhotoMode(this.engine, { onClose: () => this.closePhoto() });
     this.photoActive = false;
     const photoM = /[?&]photo=([a-z0-9_]+)/.exec(location.search);
@@ -71,28 +72,33 @@ export class Game {
     this.matchRoot = new THREE.Group();
     this.matchRoot.name = 'match';
     this.scene.add(this.matchRoot);
-    this.map = buildMap(this.matchRoot);
-    this.bots = this.map.spawns.bots.map((s) => new Bot(this.matchRoot, s, this.map.world));
+    // 正常对局读取随包发布的 assets/map-edits.json（启动时由 main.js 预取）；
+    // ?mapEdits=1 时使用地图工坊的本机预览数据。
+    const mapEdits = /[?&]mapEdits=1/.test(location.search)
+      ? loadStoredEdits()
+      : (window.__mapEdits || null);
+    this.map = buildMap(this.matchRoot, { edits: mapEdits });
+    // 5v5：5 名 CT 敌人 + 4 名 T 队友（玩家是 T 方第 5 人）
+    this.enemyBots = this.map.spawns.bots.map((s) => new Bot(this.matchRoot, s, this.map.world, {
+      team: 'ct', rig: window.__charRig
+    }));
+    this.allyBots = this.map.spawns.allies.map((s) => new Bot(this.matchRoot, s, this.map.world, {
+      team: 't', rig: window.__charRig
+    }));
+    this.bots = this.enemyBots.concat(this.allyBots);
     this.round = new Round(this);
 
     // 大厅
     console.info('[boot] lobby start');
     this.lobby = buildLobby(this.scene);
     console.info('[boot] lobby done');
-    this.crowd = new Crowd(this.lobby, {
-      quality: this.engine.quality,
-      mobile: this.engine.isMobile,
-      count: (() => {
-        const m = /[?&]crowd=(\d+)/.exec(location.search);
-        return m ? Math.max(20, Math.min(700, parseInt(m[1], 10))) : null;
-      })(),
-      far: (() => {
-        const m = /[?&]far=(\d+)/.exec(location.search);
-        return m ? Math.max(0, Math.min(400, parseInt(m[1], 10))) : null;
-      })()
-    });
-    this.crowd.total = this.crowd.n + (this.crowd.farCount || 0);
-    console.info('[boot] crowd done');
+    // 大厅不放任何占位 NPC：没有真人时就是空场，绝不用假人冒充在线。
+    // 保留同名字段/方法，供 HUD 统计与自适应逻辑安全空转。
+    this.crowd = {
+      n: 0, total: 0, farCount: 0, detailLimit: 0,
+      setVisible() {}, setQuality() {}, setDetailLimit() {}, setFarCount() {}, update() {}
+    };
+    console.info('[boot] lobby is NPC-free');
     this.range = new RangeSystem(this.lobby);
 
     this.settings = Builda.defaultSettings();
@@ -168,6 +174,14 @@ export class Game {
     await loadPhotoTextures();
     refreshWeaponTextures();
 
+    // 对局角色换成扩展包里的骨骼模型；失败时 Bot 继续用程序化方块人。
+    const glbOk = await loadAvatarModel();
+    if (glbOk) {
+      let n = 0;
+      for (const b of this.bots) if (b.setAvatar()) n++;
+      console.info('[boot] GLB 角色接入 ' + n + '/' + this.bots.length);
+    }
+
     const me = await Builda.whoami();
     this.playerName = me && me.name ? me.name : '玩家';
     this.profile = defaultProfile(this.playerName);
@@ -188,7 +202,7 @@ export class Game {
       onRematch: () => { this.lobbyUi.hideMatchEnd(); this.startMatch(this.lastModeId || 'classic'); }
     });
     this.lobbyUi.setProfile(this.profile);
-    this.lobbyUi.setOnline(this.crowd.total + 5);
+    this.lobbyUi.setOnline(1);
     this._perfEl = document.getElementById('perf');
     if (this._perfEl && this._showPerf) this._perfEl.classList.add('on');
 
@@ -320,7 +334,7 @@ export class Game {
     this.lobbyUi.show(true);
     this.lobbyUi.hideMatchEnd();
     this.lobbyUi.setProfile(this.profile);
-    this.lobbyUi.setOnline(this.crowd.total + 5);
+    this.lobbyUi.setOnline(1);
     this._perfEl = document.getElementById('perf');
     if (this._perfEl && this._showPerf) this._perfEl.classList.add('on');
     this.lobbyUi.setInteract(null);
@@ -371,6 +385,8 @@ export class Game {
     this.matchRoot.visible = true;
     this.world = this.map.world;
     this.engine.setMood('match');
+    // 对局使用随包/工坊预览的光照；回大厅时 setMood('lobby') 会恢复大厅光照。
+    if (window.__lighting) this.engine.applyLighting(window.__lighting);
 
     this.hud.showHud(true);
     this.hud.setMoney(this.money);
@@ -664,11 +680,15 @@ export class Game {
 
     const live = this.round.phase === PHASE.LIVE || this.round.phase === PHASE.PLANTED;
     if (live) {
+      const ctx = { player: this.player, tBots: this.allyBots, ctBots: this.enemyBots };
       for (const b of this.bots) {
-        b.update(dt, this.player, this.map.waypoints, {
-          onBotShoot: (bot, shot) => this._onBotShoot(bot, shot)
+        b.update(dt, ctx, this.map.waypoints, {
+          onBotShoot: (bot, shot, target) => this._onBotShoot(bot, shot, target),
+          onBotReload: () => {}
         });
       }
+      this._updateAimTarget();
+      this._updateMuzzleLight();
     }
 
     this.round.update(dt);
@@ -716,7 +736,7 @@ export class Game {
     if (this._screenT <= 0) {
       this._screenT = 3.5;
       this._drawLobbyScreen();
-      this.lobbyUi.setOnline(this.crowd.total + 5);
+      this.lobbyUi.setOnline(1);
     }
   }
 
@@ -734,7 +754,7 @@ export class Game {
       const d = Math.hypot(p.x - h.cfg.x, p.z - h.cfg.z);
       if (d < 2.6 && (!best || d < best.d)) {
         bestHero = h;
-        best = { it: { id: 'hero', label: '查看 ' + h.cfg.name + ' 的展位' }, d: d };
+        best = { it: { id: 'hero', label: '查看 ' + h.cfg.weapon.toUpperCase() + ' 展位' }, d: d };
       }
     }
 
@@ -901,7 +921,7 @@ export class Game {
     x.fillText('● LIVE', w - 52, 96);
     x.fillStyle = '#f0d7a4';
     x.font = '700 64px ui-monospace, monospace';
-    x.fillText(String(this.crowd.n + 5), w - 52, 166);
+    x.fillText('1', w - 52, 166);
     x.fillStyle = 'rgba(200,195,180,.82)';
     x.font = '600 18px ui-monospace, monospace';
     x.fillText('PLAYERS IN HALL', w - 52, 196);
@@ -993,7 +1013,7 @@ export class Game {
     const origin = this.player.eye(this._tmp);
     const dir = this.player.aimDir(new THREE.Vector3());
     let best = null;
-    for (const b of this.bots) {
+    for (const b of this.enemyBots) {
       const h = b.hitTest(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, def.range);
       if (h && (!best || h.t < best.t)) best = h;
     }
@@ -1045,6 +1065,38 @@ export class Game {
     audio.play('reload', { volume: 0.4 });
   }
 
+  /** 全场共享一盏枪口补光，落在最近开火的 Bot 上（移动端光源数量要克制）。 */
+  _updateMuzzleLight() {
+    if (!this._muzzleLight) {
+      this._muzzleLight = new THREE.PointLight(0xffb060, 0, 3.4, 2);
+      this._muzzleLight.name = 'muzzle-light';
+      this.engine.scene.add(this._muzzleLight);
+    }
+    let firing = null;
+    for (const b of this.bots) if (b.muzzleT > 0) { firing = b; break; }
+    if (!firing) { this._muzzleLight.intensity = 0; return; }
+    firing.flash.getWorldPosition(this._muzzleLight.position);
+    this._muzzleLight.intensity = 1.9;
+  }
+
+  /** 准星当前指向的敌方单位：用于单位高亮与瞄准标记（选中反馈）。 */
+  _updateAimTarget() {
+    if (!this.player.alive) {
+      for (const b of this.bots) b.aimed = false;
+      return;
+    }
+    const origin = this.player.eye(this._tmp);
+    const dir = this.player.aimDir(new THREE.Vector3());
+    let best = null;
+    let bestT = 1e9;
+    for (const b of this.enemyBots) {
+      const h = b.hitTest(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, 70);
+      if (h && h.t < bestT) { bestT = h.t; best = b; }
+    }
+    for (const b of this.enemyBots) b.aimed = (b === best);
+    for (const b of this.allyBots) b.aimed = false;
+  }
+
   _hitscan(spread) {
     const def = this.def();
     const origin = this.player.eye(this._tmp);
@@ -1062,7 +1114,7 @@ export class Game {
     const wHit = this.map.world.raycast(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, range);
 
     let best = null;
-    for (const b of this.bots) {
+    for (const b of this.enemyBots) {
       const h = b.hitTest(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, range);
       if (h && (!best || h.t < best.t)) best = h;
     }
@@ -1102,22 +1154,39 @@ export class Game {
 
   def() { return this.weapon.def; }
 
-  _onBotShoot(bot, shot) {
+  _onBotShoot(bot, shot, target) {
     const from = bot.eye(new THREE.Vector3());
-    const to = shot.hit ? this.player.eye(new THREE.Vector3()) : from.clone().addScaledVector(shot.dir, 26);
-    this._spawnTracer(from, to, 0xff7a45);
-    if (!shot.hit || !this.player.alive) return;
-    const dmg = 7 + Math.random() * 5;
-    this.player.damage(dmg);
-    this.shake = 0.5;
-    this.hud.flashDamage(0.6);
-    this.hud.setVitals(this.player.hp, this.player.armor);
-    audio.play('hit', { volume: 0.35 });
-    if (!this.player.alive) {
-      this.playerDeaths++;
+    const to = target
+      ? (target === this.player ? this.player.eye(new THREE.Vector3()) : target.eye(new THREE.Vector3()))
+      : from.clone().addScaledVector(shot.dir, 26);
+    this._spawnTracer(from, to, bot.team === 't' ? 0x9fd8ff : 0xff7a45);
+    if (!shot.hit || !target) return;
+
+    if (target === this.player) {
+      if (!this.player.alive) return;
+      const dmg = 7 + Math.random() * 5;
+      this.player.damage(dmg);
+      this.shake = 0.5;
+      this.hud.flashDamage(0.6);
+      this.hud.setVitals(this.player.hp, this.player.armor);
+      audio.play('hit', { volume: 0.35 });
+      if (!this.player.alive) {
+        this.playerDeaths++;
+        bot.kills++;
+        this.viewmodel.root.visible = false;
+        this.hud.killfeed('敌人 [ 步枪 ] 你');
+      }
+      return;
+    }
+
+    // Bot 对 Bot：队友与敌人互相伤害
+    const dmg = 16 + Math.random() * 10;
+    const killed = target.damage(dmg, shot.head);
+    if (killed) {
       bot.kills++;
-      this.viewmodel.root.visible = false;
-      this.hud.killfeed('敌人 [ 步枪 ] 你');
+      const a = bot.team === 't' ? '队友 ' + bot.label : '敌人 ' + bot.label;
+      const b = target.team === 't' ? '队友 ' + target.label : '敌人 ' + target.label;
+      this.hud.killfeed(a + ' [ 步枪 ] ' + b + (shot.head ? ' ◎' : ''));
     }
   }
 
@@ -1293,6 +1362,19 @@ export class Game {
         this.hud.setScore(this.round.scoreT, this.round.scoreCT);
         this.hud.drawRadar(this.map, this.player, this.bots, this.round.bomb);
 
+        const tRows = [{
+          name: this.playerName || '玩家',
+          kills: this.playerKills, deaths: this.playerDeaths,
+          alive: this.player.alive, you: true
+        }].concat(this.allyBots.map((b) => ({
+          name: b.label, kills: b.kills, deaths: b.deaths, alive: b.alive, you: false
+        })));
+        const ctRows = this.enemyBots.map((b) => ({
+          name: b.label, kills: b.kills, deaths: b.deaths, alive: b.alive, you: false
+        }));
+        this.hud.setRoster(tRows, ctRows);
+        this.hud.showScoreboard(this.input.isDown('scoreboard'), { t: tRows, ct: ctRows });
+
         const speed = Math.hypot(this.player.velocity.x, this.player.velocity.z);
         const gap = 4 + this.weapon.spread() * 900 + speed * 1.1 + this.weapon.recoilIndex * 0.35;
         this.hud.setCrosshairGap(gap);
@@ -1340,7 +1422,7 @@ export class Game {
       (this.crowd ? ' · ' + this.crowd.total + '人 (细节 ' + this.crowd.detailLimit + ')' : '');
   }
 
-  /** 掉帧先降分辨率，再降细节人数；中端机优先保 60。 */
+  /** 掉帧只降特效/细节，分辨率永远保持原生档（用户硬性要求）。 */
   _adaptQuality() {
     if (this._noAdapt || this._perfAge < 3 || this.mode !== 'lobby') return;
     if (this._fps < 52) {
@@ -1348,9 +1430,7 @@ export class Game {
       this._lowStreak++;
       if (this._lowStreak < 2) return;
       this._lowStreak = 0;
-      if (this.engine.renderScale > 0.7) {
-        this.engine.setRenderScale(this.engine.renderScale - 0.1);
-      } else if (this.crowd.detailLimit > this.crowd.n * 0.62) {
+      if (this.crowd.detailLimit > this.crowd.n * 0.62) {
         this.crowd.setDetailLimit(this.crowd.detailLimit * 0.87);
       } else if (this.crowd.farCount > 100) {
         this.crowd.setFarCount(this.crowd.farCount * 0.75);
@@ -1358,13 +1438,6 @@ export class Game {
         this.settings.quality = 'low';
         this.engine.setQuality('low');
         this.crowd.setQuality('low');
-      }
-    } else if (this._fps > 58) {
-      this._lowStreak = 0;
-      this._highStreak++;
-      if (this._highStreak >= 8 && this.engine.renderScale < 1) {
-        this._highStreak = 0;
-        this.engine.setRenderScale(this.engine.renderScale + 0.05);
       }
     } else {
       this._lowStreak = 0;
