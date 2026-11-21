@@ -1091,6 +1091,7 @@ async function main() {
       tactic.ctRetake >= 3 && tactic.defuserIsClosest && tactic.retakeNear,
       `回防=${tactic.ctRetake} 最近的人拆包=${tactic.defuserIsClosest} 目标都在炸弹 8.5 m 内=${tactic.retakeNear}`);
 
+
     /* 19. 渲染开销 */
     const perf = await cdp.eval(`
       const g = window.__game;
@@ -1102,6 +1103,43 @@ async function main() {
     check('draw call ≤ 120', perf.calls <= 120, 'calls=' + perf.calls);
     // v0.2 换成真武器/人物模型后三角面上调；仍远低于 PRINCIPLES 的 250k 移动端预算
     check('三角形 ≤ 80000', perf.tris <= 80000, 'tris=' + perf.tris);
+
+    /* 20. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
+    const matchSoak = await cdp.eval(`
+      const g = window.__game;
+      const r = g.round;
+      const origMode = r.mode;
+      // 压缩时间参数：先到 3 分，2 局后换边，单局 20 秒
+      const fast = Object.assign({}, origMode, {
+        winScore: 3, freezeTime: 0.3, roundTime: 20, bombTime: 8
+      });
+      r.beginMatch(fast);
+      let err = null, frames = 0;
+      for (let i = 0; i < 64 * 400; i++) {
+        try { g.simulate(1 / 64); } catch (e) { err = e.message; break; }
+        frames++;
+        if (r.matchOver) break;
+      }
+      const nan = g.bots.filter((b) => !Number.isFinite(b.pos.x + b.pos.y + b.pos.z)).length;
+      const scoreOk = r.scoreT >= 0 && r.scoreT <= 6 && r.scoreCT >= 0 && r.scoreCT <= 6;
+      const out = {
+        err, frames, matchOver: r.matchOver, score: [r.scoreT, r.scoreCT],
+        swapCount: r.swapCount, overtime: r.overtime, nan,
+        botsAlive: g.bots.filter((b) => b.alive).length,
+        moneyOk: g.bots.every((b) => b.money >= 0 && b.money <= 16000)
+      };
+      r.beginMatch(origMode);
+      g.money = 800; g.hud.setMoney(g.money);
+      return out;
+    `);
+    check('整场对局无异常', matchSoak.err === null,
+      matchSoak.err ? matchSoak.err : `模拟 ${(matchSoak.frames / 64).toFixed(0)} s 无抛错`);
+    check('整场比分与坐标合法',
+      matchSoak.matchOver && matchSoak.score[0] <= 3 && matchSoak.score[1] <= 3 &&
+      matchSoak.nan === 0 && matchSoak.moneyOk,
+      `比分 ${matchSoak.score.join(':')} / NaN=${matchSoak.nan} / 钱包合法=${matchSoak.moneyOk}`);
+    check('整场至少换边一次', matchSoak.swapCount >= 1,
+      `换边 ${matchSoak.swapCount} 次 / 加时 ${matchSoak.overtime}`);
 
     /* 汇总 */
     console.log('\n[smoke] ' + (results.length - failed) + '/' + results.length + ' 通过');
