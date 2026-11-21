@@ -20,6 +20,11 @@ export class Round {
     this.timer = 12;
     this.plantProgress = 0;
     this.bomb = null;
+    // 阶段 2：Bot 任务点与拆包进度
+    this._plantSite = null;
+    this._planter = null;
+    this._defuser = null;
+    this._defuseProgress = 0;
     this.endTimer = 0;
     this.result = null;
     this.beepT = 0;
@@ -43,6 +48,10 @@ export class Round {
     this.timer = this.mode.freezeTime || 12;
     this.plantProgress = 0;
     this.result = null;
+    this._plantSite = null;
+    this._planter = null;
+    this._defuser = null;
+    this._defuseProgress = 0;
     this.removeBomb();
 
     g.roundEnding = false;
@@ -85,6 +94,7 @@ export class Round {
 
     if (this.phase === PHASE.LIVE) {
       this.timer -= dt;
+      this._assignBotObjectives(PHASE.LIVE);
       this._plantLogic(dt);
       if (this.phase !== PHASE.LIVE) return;
       const tAlive = (player.alive ? 1 : 0) + g.allyBots.filter((b) => b.alive).length;
@@ -100,6 +110,9 @@ export class Round {
 
     if (this.phase === PHASE.PLANTED) {
       this.timer -= dt;
+      this._assignBotObjectives(PHASE.PLANTED);
+      this._defuseLogic(dt);
+      if (this.phase !== PHASE.PLANTED) return;
       this._bombVisual(dt);
       if (this.timer <= 0) { this._explode(); this.end(true, '炸弹已引爆'); return; }
       g.hud.setBombTimer(this.timer);
@@ -113,16 +126,29 @@ export class Round {
   _plantLogic(dt) {
     const g = this.game;
     const p = g.player;
-    if (!p.alive) return;
-    const site = this.siteAt(p.position.x, p.position.z);
-    const holding = g.input.isDown('use');
+    let site = null;
+    let pos = null;
 
-    if (site && holding) {
+    // 玩家优先：站在包点按住使用键
+    if (p.alive) {
+      const s = this.siteAt(p.position.x, p.position.z);
+      if (s && g.input.isDown('use')) { site = s; pos = p.position; }
+    }
+    // 玩家没接手，就看被指派的 Bot 是否到位站定（交战状态下不准下包）
+    if (!site) {
+      const b = this._planter;
+      if (b && b.alive && b.holding && !b.engage) {
+        const s = this.siteAt(b.pos.x, b.pos.z);
+        if (s) { site = s; pos = b.pos; }
+      }
+    }
+
+    if (site) {
       this.plantProgress += dt / 3.2;
       g.hud.setPlant(Math.min(1, this.plantProgress), true);
       if (this.plantProgress >= 1) {
         this.plantProgress = 0;
-        this.plant(site, p.position);
+        this.plant(site, pos);
       }
     } else if (this.plantProgress > 0) {
       this.plantProgress = Math.max(0, this.plantProgress - dt * 2.5);
@@ -130,6 +156,79 @@ export class Round {
     } else {
       g.hud.setPlant(0, false);
     }
+  }
+
+  /**
+   * 阶段 2：任务点由回合系统统一指派，Bot 只负责执行。
+   * 这样才能保证「同一时刻只有一个下包人 / 拆包人」，进度不会被多个 Bot 叠加。
+   */
+  _assignBotObjectives(phase) {
+    const g = this.game;
+    if (phase === PHASE.LIVE) {
+      if (!this._plantSite) this._plantSite = Math.random() < 0.5 ? 'A' : 'B';
+      const s = g.map.sites[this._plantSite];
+      let best = null;
+      let bestD = 1e9;
+      for (const b of g.allyBots) {
+        if (!b.alive) continue;
+        const d = Math.hypot(b.pos.x - s.x, b.pos.z - s.z);
+        if (d < bestD) { bestD = d; best = b; }
+      }
+      this._planter = best;
+      for (const b of g.allyBots) {
+        if (b === best) b.objective = { type: 'plant', x: s.x, z: s.z };
+        else if (b.objective && b.objective.type === 'plant') b.objective = null;
+      }
+      for (const b of g.enemyBots) {
+        if (b.objective && b.objective.type === 'defuse') b.objective = null;
+      }
+      return;
+    }
+
+    if (phase === PHASE.PLANTED && this.bomb) {
+      let best = null;
+      let bestD = 1e9;
+      for (const b of g.enemyBots) {
+        if (!b.alive) continue;
+        const d = Math.hypot(b.pos.x - this.bomb.x, b.pos.z - this.bomb.z);
+        if (d < bestD) { bestD = d; best = b; }
+      }
+      this._defuser = best;
+      for (const b of g.enemyBots) {
+        if (b === best) b.objective = { type: 'defuse', x: this.bomb.x, z: this.bomb.z };
+        else if (b.objective) b.objective = null;
+      }
+      for (const b of g.allyBots) {
+        if (b.objective) b.objective = null;
+        b.holding = false;
+      }
+    }
+  }
+
+  /** CT Bot 拆包：站定 5 s 完成；中途交战或被打断则进度回退。 */
+  _defuseLogic(dt) {
+    const g = this.game;
+    if (!this.bomb) return;
+    const b = this._defuser;
+    let active = false;
+    if (b && b.alive && b.holding && !b.engage) {
+      active = Math.hypot(b.pos.x - this.bomb.x, b.pos.z - this.bomb.z) < 1.7;
+    }
+
+    if (active) {
+      this._defuseProgress += dt / (this.mode.defuseTime || 5);
+      g.hud.setObjective('拆除中 ' + Math.round(Math.min(1, this._defuseProgress) * 100) + '%');
+      if (this._defuseProgress >= 1) {
+        this._defuseProgress = 0;
+        this.removeBomb();
+        g.hud.setBomb(false);
+        this.end(false, '炸弹已被拆除');
+      }
+    } else if (this._defuseProgress > 0) {
+      this._defuseProgress = Math.max(0, this._defuseProgress - dt * 1.2);
+      if (this.phase === PHASE.PLANTED) g.hud.setObjective('守住炸弹直到引爆');
+    }
+    if (this.bomb) this.bomb.defuse = this._defuseProgress;
   }
 
   siteAt(x, z) {

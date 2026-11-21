@@ -56,6 +56,10 @@ function gunModel() {
 
 const ENEMY_TEAM = { t: 'ct', ct: 't' };
 
+// 阶段 2：角色分工。按入场顺序轮转，保证每队三种角色都有人。
+// entry 先手突破、anchor 守点不动、rotator 补位。
+const ROLES = ['entry', 'anchor', 'rotator'];
+
 /* ------------------------------------------------------------------ */
 /* 运行时导航网格 + A*                                                 */
 /* ------------------------------------------------------------------ */
@@ -393,6 +397,9 @@ export class Bot {
     this.enemyTeam = ENEMY_TEAM[this.team];
     this.rig = normalizeCharRig(o.rig || DEFAULT_CHAR_RIG);
     this.label = (this.team === 't' ? 'T-' : 'CT-') + (++teamSeq[this.team]);
+    this.role = ROLES[(teamSeq[this.team] - 1) % ROLES.length];
+    this.objective = null;   // 由 round.js 下发：{ type: 'plant' | 'defuse', x, z }
+    this.holding = false;    // 已到目标点并站定（下包 / 拆包判定用）
     this.world = world;
     // 导航网格按 world 缓存，9 个 Bot 共用一张，只在首个 Bot 构造时建一次。
     this.nav = navFor(world);
@@ -565,6 +572,8 @@ export class Bot {
   }
 
   reset() {
+    this.objective = null;
+    this.holding = false;
     this.pos.set(this.spawn.x, 0, this.spawn.z);
     this.vel.set(0, 0, 0);
     this.hp = 100;
@@ -685,12 +694,17 @@ export class Bot {
       // 中远距离蹲下压枪，缩短暴露面积
       if (dist > 14 && this.crouchT <= 0 && Math.random() < dt * 0.25) this.crouchT = 2.2 + Math.random();
       faceYaw = Math.atan2(dx, dz) + Math.PI;
-      const keep = dist < 8 ? -1 : (dist > 20 ? 1 : 0);
+      // 角色差异只体现在「贴还是守」上，命中率与伤害不动，避免变成数值游戏
+      const keep = this.role === 'entry'
+        ? (dist > 5 ? 1 : -1)
+        : this.role === 'anchor'
+          ? (dist < 11 ? -1 : 0)
+          : (dist < 8 ? -1 : (dist > 20 ? 1 : 0));
       const strafe = Math.sin(performance.now() * 0.0016 + this.pos.x) * 0.55;
       const nx = dx / (dist || 1), nz = dz / (dist || 1);
       moveX = nx * keep + (-nz) * strafe;
       moveZ = nz * keep + nx * strafe;
-      speed = 2.1;
+      speed = this.role === 'entry' ? 2.5 : (this.role === 'anchor' ? 1.85 : 2.1);
 
       this.reloadCd -= dt;
       if (this.reloadT <= 0 && this.reloadCd <= 0) {
@@ -720,7 +734,9 @@ export class Bot {
         this.path.length = 0;
         this.pathT = 0;
       }
-      const steer = this._steerToGoal(dt, waypoints);
+      const steer = this.objective
+        ? this._steerToObjective(dt)
+        : this._steerToGoal(dt, waypoints);
       moveX = steer.x;
       moveZ = steer.z;
       speed = steer.speed;
@@ -791,6 +807,7 @@ export class Bot {
   /** 巡逻：沿 A* 路径走向当前航点，到点后换下一个。 */
   _steerToGoal(dt, waypoints) {
     const out = { x: 0, z: 0, speed: 0, yaw: this.group.rotation.y };
+    this.holding = false;
     const list = waypoints;
     if (!list || !list.length) return out;
 
@@ -826,6 +843,38 @@ export class Bot {
     // 门口/贴墙处收一点速度，减少撞门框后反复重试
     const cell = this.nav ? this.nav.cellOf(this.pos.x, this.pos.z) : -1;
     out.speed = (cell >= 0 && this.nav.clear[cell] <= 1) ? 1.55 : 2.2;
+    out.yaw = Math.atan2(out.x, out.z) + Math.PI;
+    return out;
+  }
+
+  /** 任务点导航：走到目标点后站定，由 round.js 推进下包 / 拆包进度。 */
+  _steerToObjective(dt) {
+    const out = { x: 0, z: 0, speed: 0, yaw: this.group.rotation.y };
+    const o = this.objective;
+    if (!o) return out;
+    const d = Math.hypot(o.x - this.pos.x, o.z - this.pos.z);
+    if (d < 0.9) {
+      this.holding = true;
+      this.path.length = 0;
+      this.pathI = 0;
+      return out;                       // 站定，不再产生位移
+    }
+    this.holding = false;
+    this.pathT -= dt;
+    if (!this.path.length && this.pathT <= 0) this._buildPath(o);
+
+    let tx = o.x, tz = o.z;
+    while (this.pathI < this.path.length) {
+      const p = this.path[this.pathI];
+      if (Math.hypot(p.x - this.pos.x, p.z - this.pos.z) > 0.45) { tx = p.x; tz = p.z; break; }
+      this.pathI++;
+    }
+    const dx = tx - this.pos.x, dz = tz - this.pos.z;
+    const dd = Math.hypot(dx, dz);
+    if (dd < 0.001) return out;
+    out.x = dx / dd;
+    out.z = dz / dd;
+    out.speed = 2.35;                   // 下包 / 拆包有硬时限，跑得比巡逻快一点
     out.yaw = Math.atan2(out.x, out.z) + Math.PI;
     return out;
   }
