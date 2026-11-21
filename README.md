@@ -108,6 +108,15 @@ npm run smoke:lobby
 - **人物页**：调整右手挂点、双手持枪姿势、脊柱、整体缩放与蹲下下沉；预览瞄准/射击/换弹/待机/倒地五种动作。
 - **保存/导出**：本机 `localStorage` + 导出 JSON；`?rigEdits=1` 预览本机数据，覆盖 `assets/` 后随包生效。
 
+### 双 AI 协作
+
+两个 AI 分别在不同平台、没有 MCP，所以采用「Git 为代码真相 + `collab/` 为消息总线」的回合制协作：
+
+- 分支：`main` 稳定线；`agent/trae`、`agent/other` 为两侧集成分支；任务分支 `agent/<name>/<task-id>-<slug>`。
+- 协议：每次改代码前读 `collab/STATE.md` 领 `collab/locks.json` 文件锁，改完写 `collab/inbox/<对方>/` 交接单。
+- 规则：共享文件（`index.html`、`js/game.js`、`js/main.js` 等）必须领锁；小步提交、先 rebase 再 PR。
+- 完整流程见 [`collab/README.md`](collab/README.md)。
+
 ### 分辨率与触屏
 
 - 分辨率永远锁定设备原生像素比（上限 3），画质档只影响阴影/云量，**任何档位都不会降分辨率**。
