@@ -4,6 +4,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { Engine } from '../render/engine.js';
 import { buildWeaponModel } from '../render/weapon-models.js';
+import { preloadWeaponModels } from '../render/model-assets.js';
 import { createAvatar, animateAvatar, loadAvatarModel } from '../render/avatar-glb.js';
 import {
   loadWeaponRig, saveWeaponRig, loadCharRig, saveCharRig,
@@ -461,6 +462,11 @@ export function startModelEditor(canvas) {
   // 初始：武器
   setWeapon(weaponId);
   setTab(tab);
+
+  // 工坊也要看 glb 版本：否则调完挂点，进游戏发现模型换了材质/细节。
+  preloadWeaponModels().then((n) => {
+    if (n > 0) setWeapon(weaponId);
+  });
 
   let last = performance.now();
   let stateT = 0;

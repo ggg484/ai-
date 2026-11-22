@@ -8,6 +8,7 @@ import { loadStoredEdits } from './world/map-edits.js';
 import { loadPhotoTextures } from './world/textures.js';
 import { refreshWeaponTextures } from './render/weapon-models.js';
 import { loadAvatarModel } from './render/avatar-glb.js';
+import { preloadWeaponModels, preloadPropModels } from './render/model-assets.js';
 import { buildLobby } from './world/lobby.js';
 import { Player } from './player/controller.js';
 import { Weapon } from './player/weapon.js';
@@ -198,6 +199,10 @@ export class Game {
       for (const b of this.bots) if (b.setAvatar()) n++;
       console.info('[boot] GLB 角色接入 ' + n + '/' + this.bots.length);
     }
+
+    // 外部建模资产：8 把武器优先用 glb，缺失时自动回退程序化几何。
+    await preloadWeaponModels();
+    await preloadPropModels();
 
     const me = await Builda.whoami();
     this.playerName = me && me.name ? me.name : '玩家';

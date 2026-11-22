@@ -5,6 +5,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { mergeGeos } from '../world/geo-utils.js';
 import { metalTexture, woodTexture, polymerTexture, getPhotoMaps } from '../world/textures.js';
+import { buildWeaponAsset } from './model-assets.js';
 
 /* ------------------------------------------------------------------ */
 /* 几何工具                                                            */
@@ -1103,8 +1104,12 @@ const BUILDERS = {
 };
 
 export function buildWeaponModel(id, opts) {
-  const fn = BUILDERS[id] || BUILDERS.glock;
   const o = opts || {};
+  // 优先用 tools/assetgen 产出的 glb（可在 Blockbench 里继续编辑）；
+  // 文件缺失或加载失败时回退到下面的程序化几何，行为完全一致。
+  const asset = buildWeaponAsset(id, o);
+  if (asset) return asset;
+  const fn = BUILDERS[id] || BUILDERS.glock;
   DETAIL = o.detail === 'low' ? 1 : 2.2;
   return fn(o);
 }
