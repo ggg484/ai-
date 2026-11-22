@@ -290,11 +290,21 @@ function applyPose(av, opts) {
     b[key].quaternion.copy(bind[key].q).multiply(_q.setFromEuler(_e));
   }
 
-  // 手臂：持枪姿态 + 后坐 / 换弹偏移
+  // 手臂：持枪姿态 + 后坐 / 换弹偏移。
+  // 步枪的左手要更往前伸到护木；手枪是双手托握；刀只抬右手。
+  const wc = av.weaponClass || 'pistol';
+  const rifle = wc === 'rifle' ? 1 : 0;
+  const knife = wc === 'knife' ? 1 : 0;
   add('rightArm', pose.rightArm[0] + shoot * 0.22, pose.rightArm[1], pose.rightArm[2]);
   add('rightForeArm', pose.rightForeArm[0] + shoot * 0.16, pose.rightForeArm[1], pose.rightForeArm[2]);
-  add('leftArm', pose.leftArm[0] - reload * 0.6, pose.leftArm[1], pose.leftArm[2]);
-  add('leftForeArm', pose.leftForeArm[0] - reload * 0.35, pose.leftForeArm[1], pose.leftForeArm[2] + reload * 0.25);
+  add('leftArm',
+    pose.leftArm[0] - reload * 0.6 - rifle * 0.28 + knife * 0.35,
+    pose.leftArm[1] + rifle * 0.10,
+    pose.leftArm[2] + rifle * 0.05);
+  add('leftForeArm',
+    pose.leftForeArm[0] - reload * 0.35 - rifle * 0.22,
+    pose.leftForeArm[1],
+    pose.leftForeArm[2] + reload * 0.25 + rifle * 0.10);
 
   // 腿：走路摆动；蹲下时收腿
   const crouch = opts.crouch ? 1 : 0;
