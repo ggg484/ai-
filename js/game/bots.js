@@ -8,8 +8,8 @@ import { audio } from '../core/audio.js';
 import { buildHumanoid, animateHumanoid } from '../render/character.js';
 import { createAvatar, animateAvatar } from '../render/avatar-glb.js';
 import { applyFaction, factionOf } from '../render/unit-faction.js';
+import { buildProxyWeapon } from '../render/weapon-models.js';
 import { WEAPONS, UTILITY, MOVEMENT } from '../config/weapons.js';
-import { mergeGeos } from '../world/geo-utils.js';
 import { normalizeCharRig, DEFAULT_CHAR_RIG } from '../render/rig.js';
 
 const BODY_R = 0.29;
@@ -20,39 +20,27 @@ const HEAD_R = 0.17;
 let seq = 0;
 const teamSeq = { t: 0, ct: 0 };
 
-function gunModel() {
-  const parts = [];
-  // 方块枪：Roblox 风格的硬边比例，总长约 0.66 m，配 0.72 m 的手臂刚好
-  const receiver = new THREE.BoxGeometry(0.075, 0.10, 0.34);
-  receiver.translate(0, 0, 0.02);
-  parts.push(receiver);
-  const barrel = new THREE.BoxGeometry(0.038, 0.038, 0.22);
-  barrel.translate(0, 0.024, -0.26);
-  parts.push(barrel);
-  const gasBlock = new THREE.BoxGeometry(0.05, 0.07, 0.10);
-  gasBlock.translate(0, 0.055, -0.20);
-  parts.push(gasBlock);
-  const mag = new THREE.BoxGeometry(0.05, 0.15, 0.075);
-  mag.rotateX(0.18);
-  mag.translate(0, -0.115, -0.02);
-  parts.push(mag);
-  const grip = new THREE.BoxGeometry(0.05, 0.10, 0.06);
-  grip.rotateX(-0.35);
-  grip.translate(0, -0.09, 0.10);
-  parts.push(grip);
-  const stock = new THREE.BoxGeometry(0.055, 0.085, 0.20);
-  stock.translate(0, -0.015, 0.28);
-  parts.push(stock);
-  const guard = new THREE.BoxGeometry(0.06, 0.05, 0.12);
-  guard.translate(0, -0.045, 0.02);
-  parts.push(guard);
-  const sight = new THREE.BoxGeometry(0.03, 0.045, 0.03);
-  sight.translate(0, 0.075, -0.10);
-  parts.push(sight);
-  const g = mergeGeos(parts);
-  parts.forEach((x) => x.dispose());
-  const m = new THREE.MeshLambertMaterial({ color: 0x2f3438 });
-  return new THREE.Mesh(g, m);
+// Bot 枪：用低面数代理模型（1 个 mesh，1 个 draw call），
+// 按 weaponId 显示步枪 / 手枪 / 刀的正确剪影，不再所有人共用一把方块枪。
+// 近距离细节交给第一人称模型；Bot 在移动端同屏 9 个，不能用高模。
+const BOT_GUN_CACHE = new Map();
+const BOT_MUZZLE = {
+  ak: -0.50, m4: -0.50, awp: -0.50, mp9: -0.50,
+  glock: -0.23, usp: -0.23, deagle: -0.23, knife: -0.30
+};
+const BOT_GUN_SCALE = 1.0;
+
+function gunModel(id) {
+  const key = BOT_MUZZLE[id] != null ? id : 'ak';
+  if (!BOT_GUN_CACHE.has(key)) {
+    const g = buildProxyWeapon(key);
+    g.userData.weaponId = key;
+    BOT_GUN_CACHE.set(key, g);
+  }
+  const clone = BOT_GUN_CACHE.get(key).clone(true);
+  clone.userData.weaponId = key;
+  clone.scale.setScalar(BOT_GUN_SCALE);
+  return clone;
 }
 
 const ENEMY_TEAM = { t: 'ct', ct: 't' };
@@ -467,7 +455,7 @@ export class Bot {
     this.group.add(this.humanoid);
     this.bodyMat = this.humanoid.userData.parts.torso.material;
 
-    const gun = gunModel();
+    const gun = gunModel(this.weaponId);
     // 枪挂在右臂末端：局部 -Z 是枪口，绕 -90° 后沿手臂方向（即正前方）指出
     gun.position.set(0.03, -0.60, -0.02);
     gun.rotation.x = -Math.PI / 2;
@@ -573,10 +561,14 @@ export class Bot {
     this.gun.position.set(0, 0.07, -0.06);
     this.gun.rotation.set(0, 0, 0);
     mount.add(this.gun);
-    this.flash.position.set(0, 0.03, -0.46);
+    this.flash.position.set(0, 0.03, (BOT_MUZZLE[this.weaponId] || -0.46) * BOT_GUN_SCALE);
     this.flash.rotation.set(0, 0, 0);
     mount.add(this.flash);
     this.weaponMount = mount;
+    this._gunMount = mount;
+    this._gunModelId = this.gun.userData.weaponId || this.weaponId;
+    av.weaponClass = this._weaponClass(this.weaponId);
+    this._applyGunModel(this.weaponId);
 
     // 出场姿态：立刻摆正持枪姿势（冻结时间也保持）
     if (av.action) {
@@ -1138,13 +1130,39 @@ export class Bot {
   }
 
   /** 枪始终握在右手：位置跟随手骨，朝向固定在身体正前方。 */
+  _weaponClass(id) {
+    if (id === 'knife') return 'knife';
+    if (id === 'glock' || id === 'usp' || id === 'deagle') return 'pistol';
+    return 'rifle';
+  }
+
+  /** weaponId 变化时换枪模型；缓存共享几何，只换 1 个 mesh。 */
+  _applyGunModel(id) {
+    const key = BOT_MUZZLE[id] != null ? id : 'ak';
+    if (!this._gunMount || this._gunModelId === key) return;
+    if (this.gun && this.gun.parent) this.gun.parent.remove(this.gun);
+    this.gun = gunModel(key);
+    this.gun.position.set(0, 0.07, -0.06);
+    this.gun.rotation.set(0, 0, 0);
+    this._gunMount.add(this.gun);
+    this._gunModelId = key;
+    this.flash.position.set(0, 0.03, (BOT_MUZZLE[key] || -0.46) * BOT_GUN_SCALE);
+    if (this.avatar) this.avatar.weaponClass = this._weaponClass(key);
+  }
+
   _updateMount() {
     if (!this.avatarHand || !this.weaponMount) return;
+    if (this.weaponId !== this._gunModelId) this._applyGunModel(this.weaponId);
     this.group.updateMatrixWorld(true);
     this.avatarHand.getWorldPosition(this._handPos);
     this.group.worldToLocal(this._handPos);
     this.weaponMount.position.copy(this._handPos).add(this._mountOffset);
     this.weaponMount.quaternion.copy(this._qTilt);
+    // 开火后坐：枪口上抬 + 向后，别只闪枪焰。
+    if (this.shootAnim > 0) {
+      this.weaponMount.position.z += this.shootAnim * 0.028;
+      this.weaponMount.rotateX(-0.09 * this.shootAnim);
+    }
   }
 
   /** 一次开火的间隔：以 glock 400 rpm 为基准，步枪更快；蹲下更稳。 */

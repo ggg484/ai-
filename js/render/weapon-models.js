@@ -103,8 +103,8 @@ function matSet(opts) {
     suppressor: make({ color: 0x24282b, metalness: 0.82, roughness: 0.4 }, metalTexture({ tone: 54, scratch: 1.2 })),
     olive: make({ color: 0x55603c, metalness: 0.05, roughness: 0.66 }, polymerTexture(70)),
     hardware: make({ color: 0x3a3f42, metalness: 0.86, roughness: 0.38 }, metalTexture({ tone: 64, scratch: 1.1 })),
-    glove: make({ color: 0x241e15, metalness: 0.04, roughness: 0.9 }),
-    sleeve: make({ color: 0x3f4030, metalness: 0.02, roughness: 0.96 })
+    glove: make({ color: 0x40352a, metalness: 0.04, roughness: 0.88 }),
+    sleeve: make({ color: 0x3d3e32, metalness: 0.02, roughness: 0.94 })
   };
   for (const [role, m] of Object.entries(out)) {
     m.userData.weaponRole = role;
@@ -147,40 +147,106 @@ export function refreshWeaponTextures() {
 }
 
 /* ------------------------------------------------------------------ */
-/* 手部                                                                */
+/* 手部 / 前臂                                                         */
 /* ------------------------------------------------------------------ */
 
-function addHands(parts, opts) {
-  if (opts && opts.hands === false) return;
-  // 握把手：掌 + 四指 + 拇指 + 袖口。所有零件都贴着握把/护木，不能悬空。
-  const g1 = roundedBox(0.075, 0.095, 0.105);
-  place(g1, 0.004, -0.108, 0.145, 0, 0, 0.06);
-  parts.glove.push(g1);
+// 每把枪的右手握把点 + 左手托枪点（模型局部坐标，枪口 -Z，单位米）。
+// 手枪的左手托住右手；刀只有右手。位置由各枪的握把/护木实际坐标决定。
+const HAND_LAYOUT = {
+  ak:     { right: [0.004, -0.105, 0.150], left: [-0.020, -0.092, -0.245] },
+  m4:     { right: [0.004, -0.105, 0.130], left: [-0.020, -0.072, -0.300] },
+  awp:    { right: [0.004, -0.110, 0.130], left: [-0.020, -0.078, -0.260] },
+  mp9:    { right: [0.004, -0.105, 0.075], left: [-0.020, -0.062, -0.250] },
+  glock:  { right: [0.004, -0.110, 0.055], left: [-0.048, -0.138, 0.035], pistol: true },
+  usp:    { right: [0.004, -0.110, 0.055], left: [-0.048, -0.142, 0.035], pistol: true },
+  deagle: { right: [0.004, -0.120, 0.060], left: [-0.052, -0.152, 0.040], pistol: true },
+  knife:  { right: [0.004, -0.020, 0.060], left: null }
+};
+
+function capsuleBetween(a, b, rA, rB) {
+  const from = new THREE.Vector3().fromArray(a);
+  const to = new THREE.Vector3().fromArray(b);
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  if (len < 1e-4) return null;
+  const g = new THREE.CylinderGeometry(rA, rB == null ? rA : rB, len, 10, 1, false);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0), dir.clone().normalize()
+  ));
+  const mid = from.clone().add(to).multiplyScalar(0.5);
+  g.translate(mid.x, mid.y, mid.z);
+  return g;
+}
+
+function addForearm(parts, hand, side, pistol) {
+  const sx = side === 'right' ? 1 : -1;
+  const wrist = [hand[0] + sx * 0.012, hand[1] - 0.035, hand[2] + 0.055];
+  // 右手前臂可以长一点；左手只留一小截，避免在步枪护木下变成一根横跨屏幕的杆。
+  const elbow = side === 'right'
+    ? [hand[0] + 0.300, hand[1] - 0.330, hand[2] + 0.460]
+    : [hand[0] - (pistol ? 0.120 : 0.080), hand[1] - (pistol ? 0.180 : 0.130), hand[2] + (pistol ? 0.140 : 0.090)];
+  const arm = capsuleBetween(wrist, elbow, 0.038, 0.058);
+  if (arm) parts[side === 'right' ? 'sleeve' : 'sleeveL'].push(arm);
+  // 袖口：比前臂粗一圈，颜色分界更清楚。
+  const cuff = capsuleBetween(
+    wrist,
+    [wrist[0] + sx * 0.020, wrist[1] - 0.050, wrist[2] + 0.068],
+    0.046, 0.052
+  );
+  if (cuff) parts[side === 'right' ? 'sleeve' : 'sleeveL'].push(cuff);
+}
+
+function addRightHand(parts, hand) {
+  const [x, y, z] = hand;
+  const palm = roundedBox(0.075, 0.095, 0.105);
+  place(palm, x, y, z, 0, 0, 0.06);
+  parts.glove.push(palm);
   for (let i = 0; i < 4; i++) {
     const f = new THREE.CapsuleGeometry(0.0095, 0.034, 3, 6);
     f.rotateZ(Math.PI / 2);
-    place(f, 0.036, -0.16 + i * 0.017, 0.115, 0, 0, 0.12);
+    place(f, x + 0.036, y - 0.055 + i * 0.017, z - 0.030, 0, 0, 0.12);
     parts.glove.push(f);
   }
   const th = new THREE.CapsuleGeometry(0.011, 0.038, 3, 6);
   th.rotateX(Math.PI / 2);
-  place(th, -0.036, -0.112, 0.175, 0.15, 0, -0.35);
+  place(th, x - 0.036, y - 0.004, z + 0.030, 0.15, 0, -0.35);
   parts.glove.push(th);
+}
 
-  // 护木手（左手托枪）：掌压在护木下方，手指从另一侧扣住
-  const g2 = roundedBox(0.082, 0.07, 0.11);
-  place(g2, -0.008, -0.058, -0.255, 0, 0, -0.12);
-  parts.glove.push(g2);
-  for (let i = 0; i < 4; i++) {
-    const f = new THREE.CapsuleGeometry(0.009, 0.032, 3, 6);
-    f.rotateX(Math.PI / 2);
-    place(f, 0.038, -0.082 + i * 0.013, -0.255, 0, 0, 0.1);
-    parts.glove.push(f);
+function addSupportHand(parts, hand, pistol) {
+  const [x, y, z] = hand;
+  const palm = roundedBox(pistol ? 0.062 : 0.082, pistol ? 0.075 : 0.070, pistol ? 0.085 : 0.110);
+  place(palm, x, y, z, 0, pistol ? 0.35 : 0, pistol ? -0.45 : -0.12);
+  parts.gloveL.push(palm);
+  const n = pistol ? 3 : 4;
+  for (let i = 0; i < n; i++) {
+    const f = new THREE.CapsuleGeometry(pistol ? 0.0085 : 0.009, pistol ? 0.028 : 0.032, 3, 6);
+    if (pistol) {
+      f.rotateZ(Math.PI / 2);
+      place(f, x + 0.026, y - 0.026 + i * 0.014, z - 0.032, 0, 0.2, 0.35);
+    } else {
+      f.rotateX(Math.PI / 2);
+      place(f, x + 0.038, y - 0.022 + i * 0.013, z, 0, 0, 0.1);
+    }
+    parts.gloveL.push(f);
   }
-  const th2 = new THREE.CapsuleGeometry(0.01, 0.034, 3, 6);
-  th2.rotateX(Math.PI / 2);
-  place(th2, -0.045, -0.04, -0.275, 0.2, 0, 0.35);
-  parts.glove.push(th2);
+  const th = new THREE.CapsuleGeometry(0.010, pistol ? 0.030 : 0.034, 3, 6);
+  th.rotateX(Math.PI / 2);
+  place(th, x - 0.044, y + (pistol ? 0.012 : 0.02), z + (pistol ? 0.006 : -0.020), 0.2, 0, 0.35);
+  parts.gloveL.push(th);
+}
+
+function addHands(parts, opts, id) {
+  if (opts && opts.hands === false) return;
+  const layout = HAND_LAYOUT[id] || HAND_LAYOUT.ak;
+  if (!parts.gloveL) parts.gloveL = [];
+  if (!parts.sleeveL) parts.sleeveL = [];
+  addRightHand(parts, layout.right);
+  addForearm(parts, layout.right, 'right', false);
+  if (layout.left) {
+    addSupportHand(parts, layout.left, !!layout.pistol);
+    addForearm(parts, layout.left, 'left', !!layout.pistol);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -387,7 +453,7 @@ function buildAK(opts) {
     parts.hardware.push(place(roundedBox(0.006, 0.01, 0.014), 0.037, 0.008, 0.07));
   }
 
-  addHands(parts, opts);
+  addHands(parts, opts, 'ak');
   return assemble(parts, opts, new THREE.Vector3(0, 0.024, -0.76), 0.88);
 }
 
@@ -443,18 +509,13 @@ function buildGlock(opts) {
   // 抛壳口 / 分解杆
   parts.metal.push(place(roundedBox(0.038, 0.016, 0.055), 0, 0.045, -0.01));
   parts.steel.push(place(roundedBox(0.004, 0.008, 0.03), 0.018, 0.005, -0.03));
-
-  addHands(parts, opts);
-  // 手枪的左手托握把（覆盖 AK 的护木手位置）
-  if (!(opts && opts.hands === false)) {
-    const g = roundedBox(0.07, 0.075, 0.085);
-    place(g, -0.022, -0.115, 0.03, 0, 0.2, -0.2);
-    parts.glove.push(g);
-    const s = new THREE.CapsuleGeometry(0.038, 0.14, 4, 8);
-    s.rotateX(Math.PI / 2);
-    place(s, -0.06, -0.16, 0.1, 0, -0.3, -0.2);
-    parts.sleeve.push(s);
+  // 下导轨：给战术灯/激光留接口，剪影上多一层细节
+  parts.metal.push(place(roundedBox(0.03, 0.016, 0.09), 0, -0.05, -0.11));
+  for (let i = 0; i < 3; i++) {
+    parts.metal.push(place(roundedBox(0.032, 0.005, 0.007), 0, -0.059, -0.14 + i * 0.026));
   }
+
+  addHands(parts, opts, 'glock');
 
   return assemble(parts, opts, new THREE.Vector3(0, 0.034, -0.25));
 }
@@ -506,22 +567,8 @@ function buildKnife(opts) {
   parts.accent.push(place(roundedBox(0.03, 0.012, 0.02), 0, 0.02, -0.055));
   parts.accent.push(place(cylinder(0.004, 0.03, 8), 0, 0.004, 0.1, 0, 0, Math.PI / 2));
 
-  // 握刀的手
-  if (!(opts && opts.hands === false)) {
-    const g = roundedBox(0.062, 0.075, 0.095);
-    place(g, 0.004, -0.02, 0.06, 0.1, 0, 0.1);
-    parts.glove.push(g);
-    for (let i = 0; i < 4; i++) {
-      const f = new THREE.CapsuleGeometry(0.009, 0.03, 3, 6);
-      f.rotateX(Math.PI / 2);
-      place(f, 0.034, -0.03 + i * 0.013, 0.035, 0, 0, 0.2);
-      parts.glove.push(f);
-    }
-    const sl = new THREE.CapsuleGeometry(0.04, 0.16, 4, 8);
-    sl.rotateX(Math.PI / 2 - 0.55);
-    place(sl, 0.04, -0.14, 0.16, 0, 0.2, 0.12);
-    parts.sleeve.push(sl);
-  }
+  // 握刀的手 + 前臂
+  addHands(parts, opts, 'knife');
 
   return assemble(parts, opts, new THREE.Vector3(0, 0.02, -0.3));
 }
@@ -694,7 +741,14 @@ function buildM4(opts) {
     parts.hardware.push(place(roundedBox(0.02, 0.008, 0.02), 0, -0.235, -0.04));
   }
 
-  addHands(parts, opts);
+  addHands(parts, opts, 'm4');
+  // 前背带环：挂在护木下缘，别悬空
+  {
+    const loop = new THREE.TorusGeometry(0.011, 0.0025, 5, 10);
+    loop.rotateY(Math.PI / 2);
+    place(loop, -0.02, -0.028, -0.44);
+    parts.hardware.push(loop);
+  }
   return assemble(parts, opts, new THREE.Vector3(0, 0.022, -0.72), 0.92);
 }
 
@@ -757,6 +811,8 @@ function buildAWP(opts) {
   place(guard, 0, -0.045, 0.07, 0.06);
   parts.metal.push(guard);
   // 瞄准镜（按真实 AWP 的比例收细）
+  // 先把镜座下方的整段导轨补出来，避免从侧面看瞄准镜像悬空。
+  parts.metal.push(place(roundedBox(0.05, 0.022, 0.36), 0, 0.086, -0.08));
   const scopeY = 0.145;
   parts.metal.push(place(cylinder(0.032, 0.30, 18), 0, scopeY, -0.08));
   parts.metal.push(place(cylinder(0.044, 0.10, 18), 0, scopeY, -0.28));
@@ -819,7 +875,7 @@ function buildAWP(opts) {
     parts.hardware.push(place(roundedBox(0.03, 0.008, 0.02), 0, -0.142, 0.02));
   }
 
-  addHands(parts, opts);
+  addHands(parts, opts, 'awp');
   return assemble(parts, opts, new THREE.Vector3(0, 0.026, -0.94));
 }
 
@@ -870,7 +926,9 @@ function buildUSP(opts) {
   parts.metal.push(place(roundedBox(0.008, 0.012, 0.012), 0, 0.064, -0.15));
   parts.metal.push(place(roundedBox(0.024, 0.01, 0.012), 0, 0.064, 0.04));
   parts.accent.push(place(cylinder(0.0025, 0.004, 6), 0, 0.07, -0.15));
-  addHands(parts, opts);
+  // USP 的战术导轨
+  parts.metal.push(place(roundedBox(0.028, 0.014, 0.08), 0, -0.048, -0.12));
+  addHands(parts, opts, 'usp');
   return assemble(parts, opts, new THREE.Vector3(0, 0.032, -0.45));
 }
 
@@ -917,7 +975,9 @@ function buildDeagle(opts) {
   parts.metal.push(place(roundedBox(0.01, 0.016, 0.014), 0, 0.072, -0.16));
   parts.metal.push(place(roundedBox(0.03, 0.012, 0.014), 0, 0.072, 0.05));
   parts.accent.push(place(roundedBox(0.03, 0.004, 0.04), 0, 0.098, -0.05));
-  addHands(parts, opts);
+  // 沙鹰下导轨
+  parts.metal.push(place(roundedBox(0.03, 0.015, 0.08), 0, -0.052, -0.12));
+  addHands(parts, opts, 'deagle');
   return assemble(parts, opts, new THREE.Vector3(0, 0.038, -0.25));
 }
 
@@ -953,15 +1013,17 @@ function buildMP9(opts) {
   guard.rotateZ(Math.PI);
   place(guard, 0, -0.05, 0.01, 0.05);
   parts.polymer.push(guard);
-  // 折叠枪托
-  parts.metal.push(place(cylinder(0.006, 0.18, 8), 0.03, 0.03, 0.20, 0, 0, Math.PI / 2));
-  parts.metal.push(place(cylinder(0.006, 0.18, 8), -0.03, 0.03, 0.20, 0, 0, Math.PI / 2));
+  // 折叠枪托：两根拉杆沿 +Z 向后，别横着穿出机匣
+  parts.metal.push(place(cylinder(0.006, 0.18, 8), 0.03, 0.03, 0.20, Math.PI / 2, 0, 0));
+  parts.metal.push(place(cylinder(0.006, 0.18, 8), -0.03, 0.03, 0.20, Math.PI / 2, 0, 0));
   parts.polymer.push(place(roundedBox(0.08, 0.09, 0.02), 0, 0.02, 0.30));
   // 照门 / 拉机柄
   parts.metal.push(place(roundedBox(0.008, 0.014, 0.012), 0, 0.078, -0.24));
   parts.metal.push(place(roundedBox(0.026, 0.01, 0.012), 0, 0.078, 0.01));
   parts.steel.push(place(cylinder(0.006, 0.03, 8), 0.035, 0.045, 0.02, 0, 0, Math.PI / 2));
-  addHands(parts, opts);
+  // 折叠前握把：贴在前护罩下方，增加 MP9 的辨识度
+  parts.polymer.push(place(roundedBox(0.026, 0.07, 0.07), 0, -0.050, -0.20, 0.22));
+  addHands(parts, opts, 'mp9');
   return assemble(parts, opts, new THREE.Vector3(0, 0.02, -0.43));
 }
 
@@ -1009,16 +1071,22 @@ function assemble(parts, opts, muzzlePos, squash) {
   Object.keys(parts).forEach((role) => {
     const list = parts[role];
     if (!list || !list.length) return;
+    const isHand = role === 'glove' || role === 'sleeve' || role === 'gloveL' || role === 'sleeveL';
     list.forEach((x) => {
-      if (squash && role !== 'glove' && role !== 'sleeve') x.scale(1, squash, 1);
+      if (squash && !isHand) x.scale(1, squash, 1);
       normalizeUV(x);
     });
     const geo = mergeGeos(list);
-    const mesh = new THREE.Mesh(geo, mats[role] || mats.metal);
-    mesh.userData.role = role;
+    const mat = role === 'gloveL' ? mats.glove : role === 'sleeveL' ? mats.sleeve : (mats[role] || mats.metal);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.role = role === 'gloveL' ? 'glove' : role === 'sleeveL' ? 'sleeve' : role;
     mesh.renderOrder = opts && opts.renderOrder != null ? opts.renderOrder : 1000;
     mesh.frustumCulled = false;
     g.add(mesh);
+    if (role === 'gloveL' || role === 'sleeveL') {
+      g.userData.left = g.userData.left || {};
+      g.userData.left[role === 'gloveL' ? 'glove' : 'sleeve'] = mesh;
+    }
     list.forEach((x) => x.dispose());
   });
   const muzzle = new THREE.Object3D();

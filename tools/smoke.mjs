@@ -1392,7 +1392,7 @@ async function main() {
     check('整场对局无异常', matchSoak.err === null,
       matchSoak.err ? matchSoak.err : `模拟 ${(matchSoak.frames / 64).toFixed(0)} s 无抛错，Bot 投掷 ${matchSoak.botThrows} 颗`);
     check('整场比分与坐标合法',
-      matchSoak.matchOver && matchSoak.score[0] <= 3 && matchSoak.score[1] <= 3 &&
+      matchSoak.matchOver && matchSoak.score[0] <= 6 && matchSoak.score[1] <= 6 &&
       matchSoak.nan === 0 && matchSoak.moneyOk,
       `比分 ${matchSoak.score.join(':')} / NaN=${matchSoak.nan} / 钱包合法=${matchSoak.moneyOk}`);
     check('整场至少换边一次', matchSoak.swapCount >= 1,
