@@ -19,7 +19,7 @@ export class Hud {
       crosshair: $('crosshair'), hitmarker: $('hitmarker'), vignette: $('vignette'),
       plantBar: $('plant-bar'), plantFill: $('plant-fill'), plantText: $('plant-text'),
       bombStatus: $('bomb-status'), bombTimer: $('bomb-timer'),
-      radar: $('radar'),
+      radar: $('radar'), radarLabel: $('radar-label'),
       roster: $('roster'), scoreboard: $('scoreboard'), sbCols: $('sb-cols'),
       start: $('start'), buy: $('buy'), settings: $('settings'), pause: $('pause'),
       roundEnd: $('round-end'), endTitle: $('end-title'), endSub: $('end-sub'),
@@ -131,6 +131,10 @@ export class Hud {
   setScore(t, ct) {
     this.el.scoreT.textContent = t;
     this.el.scoreCT.textContent = ct;
+  }
+
+  setMapName(name) {
+    if (this.el.radarLabel && name) this.el.radarLabel.textContent = String(name).toUpperCase();
   }
 
   setPlayerSide(side) {

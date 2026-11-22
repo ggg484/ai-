@@ -81,12 +81,26 @@ export class LobbyUI {
     };
 
     this._bind();
+    this._bindMapPick();
     this._buildModes();
     this._buildActivities();
     this._buildBoard();
   }
 
   /* ---------------- 基础 ---------------- */
+
+  _bindMapPick() {
+    const current = new URLSearchParams(location.search).get('map') || 'sandline';
+    document.querySelectorAll('#map-pick button').forEach((btn) => {
+      const id = btn.getAttribute('data-map');
+      btn.classList.toggle('on', id === current);
+      btn.addEventListener('click', () => {
+        const url = new URL(location.href);
+        url.searchParams.set('map', id);
+        location.href = url.toString();
+      });
+    });
+  }
 
   _bind() {
     const btnModes = $('btn-modes');

@@ -249,6 +249,24 @@ export class Engine {
       this.fill.color.setHex(0xbfd8f0);
       this.fill.intensity = 0.5;
       this.renderer.toneMappingExposure = 1.0;
+    } else if (mood === 'oasis') {
+      this.scene.fog.color.setHex(0xe2c79b);
+      this.scene.fog.near = 54;
+      this.scene.fog.far = 180;
+      this.skyMat.uniforms.zenith.value.setHex(0x2f8fbd);
+      this.skyMat.uniforms.horizon.value.setHex(0xf2d7a8);
+      this.skyMat.uniforms.ground.value.setHex(0xc69a5b);
+      this.skyMat.uniforms.sunDir.value.set(0.72, 0.55, 0.32);
+      this.skyMat.uniforms.cloudiness.value = 0.28;
+      this.sun.color.setHex(0xffe2b0);
+      this.sun.intensity = 2.35;
+      this.sun.position.set(52, 56, 30);
+      this.hemi.color.setHex(0xfff0d8);
+      this.hemi.groundColor.setHex(0xc79a62);
+      this.hemi.intensity = 1.1;
+      this.fill.color.setHex(0x9fd0e8);
+      this.fill.intensity = 0.36;
+      this.renderer.toneMappingExposure = 1.05;
     } else {
       this.scene.fog.color.setHex(0xbfe4f5);
       this.scene.fog.near = 62;

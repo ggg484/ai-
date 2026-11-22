@@ -33,7 +33,7 @@
   <div class="hud-top">
     <div class="radar-wrap">
       <canvas id="radar" width="160" height="160"></canvas>
-      <div class="radar-label">SANDLINE</div>
+      <div class="radar-label" id="radar-label">SANDLINE</div>
     </div>
 
     <div class="round-box">
@@ -197,6 +197,11 @@
       <button class="close" data-close="modes">×</button>
     </div>
     <div class="mode-grid" id="mode-grid"></div>
+    <div class="map-pick" id="map-pick">
+      <span>地图</span>
+      <button type="button" data-map="sandline">沙城协议 · SANDLINE</button>
+      <button type="button" data-map="oasis">绿洲 · OASIS</button>
+    </div>
     <div class="panel-foot"><span>所有模式共享同一套账号与藏品；当前版本不接入付费内容。</span></div>
   </div>
 </div>
