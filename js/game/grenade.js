@@ -1,5 +1,8 @@
 // 投掷物系统：抛物线、引信、HE / 闪光 / 烟雾 / 燃烧瓶。
-// 只服务玩家侧投掷；Bot 用投掷物留给后续 T-009/T-011。
+// T-014 起兼做两件事：
+//   1) 烟雾视线判定（smokeBlocks）：玩家 / Bot 共用同一份查询，避免「人看不见、Bot 穿烟打」；
+//   2) Bot 投掷通道（world.botUtilityQueue）：Bot 只往队列塞请求，由本系统统一生成投掷物，
+//      这样 bots.js 不需要持有 game 引用，也不用改 game.js 的 ctx。
 import * as THREE from '../../vendor/three.module.js';
 import { MOVEMENT, UTILITY, ECONOMY } from '../config/weapons.js';
 import { buildPropModel } from '../render/prop-models.js';
@@ -8,6 +11,52 @@ import { audio } from '../core/audio.js';
 
 const GRAVITY = MOVEMENT.gravity;
 const V = new THREE.Vector3();
+
+// 烟柱高度：从落地中心往上算。两端都在烟顶以上时不算遮挡（高台对高台）。
+const SMOKE_HEIGHT = 2.8;
+// 起烟 0.35 s 内半径线性涨满，避免「刚落地就隔空挡枪」的突兀感。
+const SMOKE_BLOOM = 0.35;
+// world 上的私有标记：用 Symbol 避免污染 Object.keys(world)
+const FIELD = Symbol('grenadeField');
+
+/** 2D 线段 vs 圆：用于俯视视角下的烟遮断。 */
+function segHitsCircle(ax, az, bx, bz, cx, cz, r) {
+  const dx = bx - ax, dz = bz - az;
+  const l2 = dx * dx + dz * dz;
+  let t = l2 > 1e-6 ? ((cx - ax) * dx + (cz - az) * dz) / l2 : 0;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const px = ax + dx * t - cx;
+  const pz = az + dz * t - cz;
+  return px * px + pz * pz <= r * r;
+}
+
+/**
+ * 烟雾是否挡住 a→b 的视线。
+ *
+ * 全仓唯一实现：Bot 的目标获取 / 开枪前检查走这里；玩家侧（以及将来的观战、投掷物
+ * 视线判定）也调同一份，保证双方看到的是同一团烟，不存在「一边挡一边不挡」。
+ * 判定是 2D 的（烟近似竖直圆柱），另加高度闸门：两端都在烟顶以上时放行。
+ *
+ * @param {number} ax @param {number} ay @param {number} az
+ * @param {number} bx @param {number} by @param {number} bz
+ * @param {Array} smokes GrenadeSystem.smokes
+ * @returns {boolean} true = 被烟挡住
+ */
+export function smokeBlocks(ax, ay, az, bx, by, bz, smokes) {
+  if (!smokes || !smokes.length) return false;
+  const low = Math.min(ay, by);
+  for (let i = 0; i < smokes.length; i++) {
+    const s = smokes[i];
+    if (!s || s.t > s.life) continue;
+    if (low > s.y + SMOKE_HEIGHT) continue;
+    const grow = s.t < SMOKE_BLOOM ? s.t / SMOKE_BLOOM : 1;
+    const r = s.radius * grow;
+    if (r < 0.2) continue;
+    if (segHitsCircle(ax, az, bx, bz, s.x, s.z, r)) return true;
+  }
+  return false;
+}
 
 let smokeTexture = null;
 function getSmokeTexture() {
@@ -45,6 +94,9 @@ export class GrenadeSystem {
     this.explosions = [];
     this.smokes = [];
     this.fires = [];
+    // T-014：Bot 投掷请求队列。Bot 只 push {type, origin, vel, owner}，
+    // 由 update() 统一生成投掷物；队列对象挂在 world 上供 bots.js 取用。
+    this.queue = [];
   }
 
   clear() {
@@ -58,9 +110,40 @@ export class GrenadeSystem {
     this.explosions = [];
     this.smokes = [];
     this.fires = [];
+    this.queue.length = 0;
+  }
+
+  /**
+   * 把烟雾查询挂到「当前」world 上。game.world 会在大厅/对局之间切换
+   * （构造时还是大厅 world），所以只能每帧懒绑定，不能构造函数里绑一次。
+   */
+  _syncWorld() {
+    const w = this.game && this.game.world;
+    if (!w || w[FIELD] === this) return;
+    w[FIELD] = this;
+    // 只读查询：不复制烟数据，闭包里取 this.smokes，clear() 重新赋值也能跟着走
+    w.smokeBlocks = (ax, ay, az, bx, by, bz) => smokeBlocks(ax, ay, az, bx, by, bz, this.smokes);
+    w.botUtilityQueue = this.queue;
+  }
+
+  /** 烟雾视线查询（玩家与 Bot 共用；world.smokeBlocks 是同一个函数）。 */
+  smokeBlocks(ax, ay, az, bx, by, bz) {
+    return smokeBlocks(ax, ay, az, bx, by, bz, this.smokes);
   }
 
   throw(type, origin, dir) {
+    const def = UTILITY[type];
+    if (!def) return false;
+    const vel = dir.clone().multiplyScalar(18);
+    vel.y += 2.8;
+    vel.addScaledVector(this.game.player.velocity, 0.35);
+    if (!this._spawn(type, origin, vel, null)) return false;
+    audio.play('throw', { volume: 0.5 });
+    return true;
+  }
+
+  /** 生成一颗投掷物。owner 为投掷者（Bot），用于闪光不闪自己。 */
+  _spawn(type, origin, vel, owner) {
     const def = UTILITY[type];
     if (!def) return false;
     let mesh = null;
@@ -77,22 +160,35 @@ export class GrenadeSystem {
     mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     this.game.matchRoot.add(mesh);
 
-    const vel = dir.clone().multiplyScalar(18);
-    vel.y += 2.8;
-    vel.addScaledVector(this.game.player.velocity, 0.35);
-
     this.projectiles.push({
       type, def, mesh,
       pos: origin.clone(),
-      vel,
+      vel: vel.clone(),
       fuse: def.fuse,
-      dead: false
+      dead: false,
+      owner: owner || null
     });
-    audio.play('throw', { volume: 0.5 });
     return true;
   }
 
+  /** 消费 Bot 投掷请求。逐个生成；队列每帧清空，Bot 不会攒请求。 */
+  _drainBotThrows() {
+    const q = this.queue;
+    if (!q.length) return;
+    for (let i = 0; i < q.length; i++) {
+      const req = q[i];
+      const origin = new THREE.Vector3(req.origin.x, req.origin.y, req.origin.z);
+      const vel = new THREE.Vector3(req.vel.x, req.vel.y, req.vel.z);
+      if (this._spawn(req.type, origin, vel, req.owner)) {
+        audio.play('throw', { volume: 0.35 });
+      }
+    }
+    q.length = 0;
+  }
+
   update(dt) {
+    this._syncWorld();
+    this._drainBotThrows();
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       if (p.dead) {
@@ -170,7 +266,7 @@ export class GrenadeSystem {
 
   _detonate(p, pos) {
     if (p.type === 'he') this._explode(pos);
-    else if (p.type === 'flash') this._flash(pos);
+    else if (p.type === 'flash') this._flash(pos, p.owner);
     else if (p.type === 'smoke') this._smoke(pos);
     else if (p.type === 'molotov') this._fire(pos);
   }
@@ -214,7 +310,7 @@ export class GrenadeSystem {
     audio.play('he_explode', { volume: 1 });
   }
 
-  _flash(pos) {
+  _flash(pos, owner) {
     const def = UTILITY.flash;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(1, 14, 10),
@@ -245,6 +341,8 @@ export class GrenadeSystem {
     }
     for (const b of this.game.bots) {
       if (!b.alive) continue;
+      // 自己扔的闪不闪自己（Bot 贴脸扔闪时不该自废）
+      if (owner && b === owner) continue;
       const eye = b.eye(new THREE.Vector3());
       const dist = pos.distanceTo(eye);
       if (dist >= def.radius) continue;
@@ -282,7 +380,9 @@ export class GrenadeSystem {
     group.add(points);
     this.game.matchRoot.add(group);
     this.smokes.push({
-      group, points, mat, positions, t: 0, life: def.duration, radius: def.radius
+      group, points, mat, positions, t: 0, life: def.duration, radius: def.radius,
+      // 世界坐标单独存一份：视线查询不该依赖渲染对象，也方便测试直接构造
+      x: group.position.x, y: group.position.y, z: group.position.z
     });
     audio.play('smoke_pop', { volume: 0.7 });
   }

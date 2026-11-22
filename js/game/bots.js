@@ -8,7 +8,7 @@ import { audio } from '../core/audio.js';
 import { buildHumanoid, animateHumanoid } from '../render/character.js';
 import { createAvatar, animateAvatar } from '../render/avatar-glb.js';
 import { applyFaction, factionOf } from '../render/unit-faction.js';
-import { WEAPONS } from '../config/weapons.js';
+import { WEAPONS, UTILITY, MOVEMENT } from '../config/weapons.js';
 import { mergeGeos } from '../world/geo-utils.js';
 import { normalizeCharRig, DEFAULT_CHAR_RIG } from '../render/rig.js';
 
@@ -446,6 +446,12 @@ export class Bot {
     // T-009 阶段 2：武器与护甲。购买由 round.js 在冻结时间统一执行。
     this.weaponId = 'glock';
     this.armor = 0;
+    // T-014：投掷物库存与投掷节奏。每回合由 reset() 按角色重新发放，
+    // 不跨回合累积；throwCd 保证不会一有机会就每帧扔。
+    this.utility = { smoke: 0, flash: 0 };
+    this.throwCd = 0;
+    this._throwSig = '';
+    this._spotCache = null;
 
     this.group = new THREE.Group();
     this.group.name = this.id;
@@ -522,6 +528,7 @@ export class Bot {
     this._mountOffset = new THREE.Vector3(0, 0.07, -0.06);
     this._handPos = new THREE.Vector3();
     this._eye = new THREE.Vector3();
+    this._pickEye = new THREE.Vector3();
     this._targetEye = new THREE.Vector3();
   }
 
@@ -586,6 +593,13 @@ export class Bot {
     // 上回合阵亡则掉枪；护甲不跨回合，购买阶段重新买
     if (!this.alive) this.weaponId = 'glock';
     this.armor = 0;
+    // 投掷物每回合重发：所有人 1 烟；T 的 entry 多 1 闪，CT 的 anchor 多 1 闪。
+    // 数量固定，等于给「每回合最多两次投掷」上了硬上限，不依赖经济。
+    this.utility.smoke = 1;
+    this.utility.flash = (this.team === 't' ? this.role === 'entry' : this.role === 'anchor') ? 1 : 0;
+    this.throwCd = 1.2 + Math.random() * 1.8;
+    this._throwSig = '';
+    this._spotCache = null;
     this.objective = null;
     this.holding = false;
     this.pos.set(this.spawn.x, 0, this.spawn.z);
@@ -667,6 +681,7 @@ export class Bot {
     let best = null;
     let bestD = 1e9;
     const maxD = this.viewRange();
+    const myEye = this.eye(this._pickEye);
     for (const item of list) {
       const u = item.unit;
       const px = item.player ? u.position.x : u.pos.x;
@@ -674,11 +689,199 @@ export class Bot {
       const d = Math.hypot(px - this.pos.x, pz - this.pos.z);
       if (d >= maxD || d >= bestD) continue;
       const pe = item.player ? u.eye(new THREE.Vector3()) : u.eye(new THREE.Vector3());
-      if (!this.world.lineOfSight(this.pos.x, this.pos.y + 1.55, this.pos.z, pe.x, pe.y, pe.z)) continue;
+      if (!this.world.lineOfSight(myEye.x, myEye.y, myEye.z, pe.x, pe.y, pe.z)) continue;
+      // T-014：烟雾与实体墙同级。被烟挡住的目标不算「看得见」，Bot 不会穿烟锁定。
+      if (this._smokeBlocked(myEye, pe)) continue;
       bestD = d;
       best = { unit: u, player: item.player, dist: d, eye: pe };
     }
     return best;
+  }
+
+  /**
+   * 烟雾遮挡查询。判定实现放在 grenade.js，players 与 bots 共用同一份；
+   * world 上没有投掷系统时（纯导航测试）视为无烟。
+   */
+  _smokeBlocked(from, to) {
+    const w = this.world;
+    if (!w || typeof w.smokeBlocks !== 'function') return false;
+    return w.smokeBlocks(from.x, from.y, from.z, to.x, to.y, to.z);
+  }
+
+  /* ---------------- T-014：投掷物 AI ---------------- */
+
+  /**
+   * 投掷决策：进攻对包点入口投烟/闪，防守对本点入口投烟。
+   *
+   * 不依赖地图坐标：Bot 手里只有 round 下发的 objective 和导航网格，
+   * 咽喉点从 nav.clear（每格到墙距离）里找，换地图不用改这里。
+   */
+  _maybeThrow(ctx, target) {
+    if (this.throwCd > 0) return;
+    // 贴脸对枪时先打完这一梭，不掏投掷物
+    if (target && target.dist < 16) return;
+    const o = this.objective;
+    const w = this.world;
+    if (!o || !w || !w.botUtilityQueue) return;
+    if (o.type !== 'push' && o.type !== 'plant' && o.type !== 'guard') return;
+
+    const d = Math.hypot(o.x - this.pos.x, o.z - this.pos.z);
+    // 进攻：进到 30 m 内再投（再远弹道拉不住）；防守：站上点位才投。
+    // 30 m 是按真实地图尺度定的：沙城出生点到包点 ~60 m，推进到半场才该起烟。
+    if (o.type === 'guard' ? d > 14 : (d < 6 || d > 30)) return;
+
+    // 同一个目标点一回合只投一次，绝不每帧扔
+    const sig = o.type + ':' + Math.round(o.x) + ',' + Math.round(o.z);
+    if (this._throwSig === sig) return;
+
+    const type = this._pickUtility();
+    if (!type) return;
+
+    const spot = this._throwSpot(o);
+    if (!spot) return;
+
+    const origin = this.eye(new THREE.Vector3());
+    // 不隔墙乱扔：出手点必须看得见落点（落点上抬 0.8 m，避免被地面自身挡住）
+    if (!w.lineOfSight(origin.x, origin.y, origin.z, spot.x, spot.y + 0.8, spot.z)) return;
+    // 队友在落点附近就别扔（闪光尤其致命）
+    if (this._matesHit(ctx, spot, type)) return;
+
+    // 弹道解：引信到期的瞬间正好落在 spot 上
+    const t = Math.max(0.6, UTILITY[type].fuse);
+    const vx = (spot.x - origin.x) / t;
+    const vz = (spot.z - origin.z) / t;
+    const vy = (spot.y - origin.y + 0.5 * MOVEMENT.gravity * t * t) / t;
+    if (Math.hypot(vx, vz) > 22) return;
+
+    w.botUtilityQueue.push({
+      type,
+      origin: { x: origin.x, y: origin.y, z: origin.z },
+      vel: { x: vx, y: vy, z: vz },
+      owner: this
+    });
+    this.utility[type]--;
+    this._throwSig = sig;
+    this.throwCd = 7 + Math.random() * 4;
+  }
+
+  /** T：entry 先闪、其他人投烟；CT 只投烟。 */
+  _pickUtility() {
+    if (this.team === 't' && this.role === 'entry' && this.utility.flash > 0) return 'flash';
+    if (this.utility.smoke > 0) return 'smoke';
+    if (this.team === 't' && this.utility.flash > 0) return 'flash';
+    return null;
+  }
+
+  /** 落点：进攻沿实际进攻路径找 4–12 m 处的窄口；防守选包点另一侧的窄口。 */
+  _throwSpot(o) {
+    // A* 不便宜：同一个目标、位移不超过 4 m 时复用上次结果
+    const key = o.type + ':' + Math.round(o.x) + ',' + Math.round(o.z);
+    const cache = this._spotCache;
+    if (cache && cache.key === key &&
+        Math.hypot(cache.bx - this.pos.x, cache.bz - this.pos.z) < 4) {
+      return cache.spot;
+    }
+    const spot = this._computeThrowSpot(o);
+    this._spotCache = { key, bx: this.pos.x, bz: this.pos.z, spot };
+    return spot;
+  }
+
+  _computeThrowSpot(o) {
+    if (o.type === 'guard') {
+      // 防守：避开自家出生点一侧，选包点「另一边」的窄口 ≈ 进攻方入口
+      const spot = this._findChoke(o.x, o.z, 6, 16, this.spawn);
+      if (spot) {
+        spot.y = this._groundY(spot.x, spot.z);
+        return spot;
+      }
+    } else {
+      const nav = this.nav;
+      const path = nav ? nav.path(this.pos.x, this.pos.z, o.x, o.z) : null;
+      if (path && path.length) {
+        // 从目标往回量，取 4–12 m 路段里离墙最近的拐点：那就是入口/咽喉
+        let acc = 0;
+        let best = null;
+        let bestClear = Infinity;
+        for (let i = path.length - 1; i >= 0; i--) {
+          const p = path[i];
+          const q = path[i - 1] || { x: this.pos.x, z: this.pos.z };
+          acc += Math.hypot(p.x - q.x, p.z - q.z);
+          if (acc < 4 || acc > 12) continue;
+          const idx = nav.cellOf(p.x, p.z);
+          if (idx < 0) continue;
+          const clearM = nav.clear[idx] * nav.step;
+          if (clearM < bestClear) { bestClear = clearM; best = p; }
+        }
+        if (best) return { x: best.x, z: best.z, y: this._groundY(best.x, best.z) };
+      }
+    }
+    // 兜底：朝目标方向退 10 m，且必须是可走格
+    const dx = o.x - this.pos.x, dz = o.z - this.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const k = Math.min(0.7, 10 / d);
+    const x = this.pos.x + dx * k, z = this.pos.z + dz * k;
+    if (!this.nav || !this.nav.isFree(x, z)) return null;
+    return { x, z, y: this._groundY(x, z) };
+  }
+
+  /**
+   * 在 (cx,cz) 的 [rMin,rMax] 环带里找最像咽喉的格子：
+   * 离墙越近（clear 越小）分越高；avoid 用来把落点推离某个方向（防守时避开己方出生点）。
+   */
+  _findChoke(cx, cz, rMin, rMax, avoid) {
+    const nav = this.nav;
+    if (!nav) return null;
+    const step = nav.step;
+    const i0 = Math.max(0, Math.floor((cx - rMax - nav.minX) / step));
+    const i1 = Math.min(nav.w - 1, Math.ceil((cx + rMax - nav.minX) / step));
+    const j0 = Math.max(0, Math.floor((cz - rMax - nav.minZ) / step));
+    const j1 = Math.min(nav.h - 1, Math.ceil((cz + rMax - nav.minZ) / step));
+    let best = null;
+    let bestScore = -Infinity;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const idx = j * nav.w + i;
+        if (!nav.walk[idx]) continue;
+        const x = nav.cx(idx), z = nav.cz(idx);
+        const d = Math.hypot(x - cx, z - cz);
+        if (d < rMin || d > rMax) continue;
+        const clearM = nav.clear[idx] * step;
+        let score = (2.4 - Math.min(2.4, clearM)) * 2 - d * 0.12;
+        if (avoid) score += Math.hypot(x - avoid.x, z - avoid.z) * 0.06;
+        if (score > bestScore) { bestScore = score; best = { x, z }; }
+      }
+    }
+    return best;
+  }
+
+  /** 落点地面高度：从 4 m 往下打一条射线，高台/台阶也能落对。 */
+  _groundY(x, z) {
+    const w = this.world;
+    if (w && typeof w.raycast === 'function') {
+      const hit = w.raycast(x, 4, z, 0, -1, 0, 8);
+      if (hit) return hit.y;
+    }
+    return 0.1;
+  }
+
+  /** 落点附近有队友（且中间没有墙）时返回 true。 */
+  _matesHit(ctx, spot, type) {
+    const r = type === 'flash' ? 10 : 4;
+    const list = this.team === 't' ? (ctx.tBots || []) : (ctx.ctBots || []);
+    const check = (mx, my, mz) => {
+      if (Math.hypot(mx - spot.x, mz - spot.z) > r) return false;
+      return this.world.lineOfSight(spot.x, spot.y + 0.8, spot.z, mx, my, mz);
+    };
+    for (const m of list) {
+      if (m === this || !m.alive) continue;
+      if (check(m.pos.x, m.pos.y + 1.55, m.pos.z)) return true;
+    }
+    // 玩家也可能在同一队（半场交换后）
+    if (ctx.player && ctx.player.alive && ctx.playerTeam === this.team) {
+      const p = ctx.player;
+      if (check(p.position.x, p.position.y + 1.55, p.position.z)) return true;
+    }
+    return false;
   }
 
   update(dt, ctx, waypoints, cb) {
@@ -689,6 +892,7 @@ export class Bot {
     }
 
     this.flashT = Math.max(0, this.flashT - dt);
+    this.throwCd = Math.max(0, this.throwCd - dt);
     this.hitT = Math.max(0, this.hitT - dt);
     this.muzzleT = Math.max(0, this.muzzleT - dt);
     this.shootAnim = Math.max(0, this.shootAnim - dt * 5.5);
@@ -710,6 +914,9 @@ export class Bot {
     const target = this._pickTarget(ctx);
     const canSee = !!target;
     this.engage = canSee;
+    // 投掷物不要求完全脱战：只要不是贴脸对枪（<16 m）就可以先手起烟。
+    // 真实对局里包点附近几乎一直有交火，若只在脱战时投，Bot 永远扔不出去。
+    this._maybeThrow(ctx, target);
     let moveX = 0, moveZ = 0, speed = 0;
     let faceYaw = this.group.rotation.y;
 
@@ -745,13 +952,19 @@ export class Bot {
       } else {
         this.shootCd -= dt;
         if (this.shootCd <= 0 && this.reaction > 0.35) {
-          this.shootCd = this._shotDelay();
-          this.muzzleT = 0.06;
-          this.shootAnim = 1;
-          this.flash.visible = true;
-          // 回调要的是「被打的单位」本身（Bot 或 player），不是 _pickTarget 的包装对象：
-          // game._onBotShoot 里直接调 target.eye()/target.damage()，传包装对象会 TypeError。
-          cb.onBotShoot(this, this._rollShot(this.eye(this._eye), target.eye, dist, target.player), target.unit);
+          // 开枪前再查一次烟：锁定发生在帧首，这一帧里目标可能刚好被烟盖住
+          if (this._smokeBlocked(this.eye(this._eye), target.eye)) {
+            this.shootCd = 0.25;
+            this.reaction = 0;
+          } else {
+            this.shootCd = this._shotDelay();
+            this.muzzleT = 0.06;
+            this.shootAnim = 1;
+            this.flash.visible = true;
+            // 回调要的是「被打的单位」本身（Bot 或 player），不是 _pickTarget 的包装对象：
+            // game._onBotShoot 里直接调 target.eye()/target.damage()，传包装对象会 TypeError。
+            cb.onBotShoot(this, this._rollShot(this.eye(this._eye), target.eye, dist, target.player), target.unit);
+          }
         }
       }
     } else {
@@ -761,6 +974,7 @@ export class Bot {
         this.path.length = 0;
         this.pathT = 0;
       }
+      // 投掷已在上方按「目标距离」判定，这里不再重复
       const steer = this.objective
         ? this._steerToObjective(dt)
         : this._steerToGoal(dt, waypoints);

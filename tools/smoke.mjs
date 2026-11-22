@@ -1213,20 +1213,166 @@ async function main() {
       !!fixture3.retarget && fixture3.retarget.x === fixture3.siteB.x && fixture3.retarget.z === fixture3.siteB.z,
       `objective=${JSON.stringify(fixture3.retarget)} / siteB=${JSON.stringify(fixture3.siteB)}`);
 
-    /* 22. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
+    /* 22. 烟雾视线 + Bot 投掷（T-014） */
+    const smokeLos = await cdp.eval(`
+      const THREE = await import('/vendor/three.module.js');
+      const { buildFixtureMap } = await import('/tools/map-fixture.mjs');
+      const { Bot } = await import('/js/game/bots.js');
+      const { GrenadeSystem } = await import('/js/game/grenade.js');
+
+      const map = buildFixtureMap({ siteCount: 2 });
+      const t = new Bot(map.root, { x: 0, z: -6, yaw: 0 }, map.world, { team: 't' });
+      const ct = new Bot(map.root, { x: 0, z: 6, yaw: Math.PI }, map.world, { team: 'ct' });
+      const game = {
+        world: map.world,
+        matchRoot: map.root,
+        player: { alive: false, position: new THREE.Vector3(0, 0, -20), eye() { return new THREE.Vector3(0, 1.55, -20); } },
+        bots: [t, ct],
+        hud: { flashDamage() {}, killfeed() {} },
+        shake: 0, playerKills: 0, addMoney() {}, isPlayerTeam: () => true
+      };
+      const grenades = new GrenadeSystem(game);
+      grenades.update(1 / 64);   // 绑定 world.smokeBlocks / botUtilityQueue
+
+      const ctx = { player: game.player, playerTeam: 't', tBots: [t], ctBots: [ct] };
+      const seesBefore = !!ct._pickTarget(ctx);
+
+      // 无烟时先开一轮火，确认基线真的在开火
+      let shots = 0;
+      const cb = { onBotShoot() { shots++; }, onBotReload() {} };
+      ct.shootCd = 0;
+      ct.reaction = 1;
+      for (let i = 0; i < 64; i++) ct.update(1 / 64, ctx, map.waypoints, cb);
+      const shotsBefore = shots;
+
+      // 两人正中放一颗烟，等它涨满
+      grenades._smoke(new THREE.Vector3(0, 0.2, 0));
+      for (let i = 0; i < 30; i++) grenades.update(1 / 64);
+
+      const blocked = map.world.smokeBlocks(0, 1.55, -6, 0, 1.55, 6);
+      const clearSide = map.world.smokeBlocks(-6, 1.55, -6, 6, 1.55, -6);
+      const highLine = map.world.smokeBlocks(0, 6, -6, 0, 6, 6);
+      const sharedApi = grenades.smokeBlocks(0, 1.55, -6, 0, 1.55, 6) === blocked &&
+        typeof map.world.smokeBlocks === 'function';
+      const seesAfter = !!ct._pickTarget(ctx);
+
+      // 烟里不许开火
+      ct.shootCd = 0;
+      ct.reaction = 1;
+      for (let i = 0; i < 64; i++) ct.update(1 / 64, ctx, map.waypoints, cb);
+      const shotsInSmoke = shots - shotsBefore;
+
+      // 烟散后恢复
+      grenades.smokes[0].t = 999;
+      const seesRestored = !!ct._pickTarget(ctx);
+      const smokeCount = grenades.smokes.length;
+      grenades.clear();
+
+      return { seesBefore, shotsBefore, blocked, clearSide, highLine, sharedApi, seesAfter, shotsInSmoke, seesRestored, smokeCount };
+    `);
+
+    check('烟雾挡视线：同一个查询给玩家和 Bot 用',
+      smokeLos.blocked === true && smokeLos.clearSide === false && smokeLos.highLine === false && smokeLos.sharedApi,
+      `横穿=${smokeLos.blocked} 旁路=${smokeLos.clearSide} 高空=${smokeLos.highLine} 共用=${smokeLos.sharedApi}`);
+    check('烟雾中 Bot 丢失锁定',
+      smokeLos.seesBefore === true && smokeLos.seesAfter === false && smokeLos.seesRestored === true,
+      `放烟前=${smokeLos.seesBefore} 烟中=${smokeLos.seesAfter} 烟散=${smokeLos.seesRestored}`);
+    check('烟雾中 Bot 不开火',
+      smokeLos.shotsBefore > 0 && smokeLos.shotsInSmoke === 0,
+      `放烟前开火 ${smokeLos.shotsBefore} 次 / 烟中 ${smokeLos.shotsInSmoke} 次`);
+
+    const botThrow = await cdp.eval(`
+      const { buildFixtureMap, createArena } = await import('/tools/map-fixture.mjs');
+      const { GrenadeSystem } = await import('/js/game/grenade.js');
+
+      const map = buildFixtureMap({ siteCount: 2 });
+      const arena = await createArena(map, { perTeam: 2, combat: false });
+      const game = {
+        world: map.world, matchRoot: map.root, player: arena.player, bots: arena.bots,
+        hud: { flashDamage() {}, killfeed() {} }, shake: 0, playerKills: 0,
+        addMoney() {}, isPlayerTeam: () => true
+      };
+      arena.player.alive = false;
+      const grenades = new GrenadeSystem(game);
+      const ctx = { player: arena.player, playerTeam: 't', tBots: [], ctBots: [] };
+      const noop = { onBotShoot() {}, onBotReload() {} };
+
+      arena.begin();
+      const thrown = [];
+      let smoke = null;
+      let frames = 0;
+      for (let i = 0; i < 64 * 80; i++) {
+        frames++;
+        if (arena.round.phase === 'live' || arena.round.phase === 'planted') {
+          for (const b of arena.bots) b.update(1 / 64, ctx, map.waypoints, noop);
+        }
+        const q = map.world.botUtilityQueue;
+        if (q && q.length) {
+          for (const r of q) thrown.push({ type: r.type, owner: r.owner.id, team: r.owner.team });
+        }
+        arena.round.update(1 / 64);
+        grenades.update(1 / 64);
+        if (grenades.smokes.length) {
+          const s = grenades.smokes[0];
+          const dists = Object.keys(map.sites).map((k) => Math.hypot(s.x - map.sites[k].x, s.z - map.sites[k].z));
+          smoke = { x: +s.x.toFixed(1), z: +s.z.toFixed(1), nearSite: +Math.min.apply(null, dists).toFixed(1) };
+          break;
+        }
+      }
+
+      // 库存上限：每个 Bot 每回合最多 1 烟 + 1 闪
+      const capOk = thrown.length <= arena.bots.length * 2;
+      const typesOk = thrown.every((r) => r.type === 'smoke' || r.type === 'flash');
+      const usedSmoke = arena.bots.filter((b) => b.utility.smoke === 0).length;
+      const negOk = arena.bots.every((b) => b.utility.smoke >= 0 && b.utility.flash >= 0);
+
+      // 每回合重发：reset() 后库存回满、目标签名清空
+      const b0 = arena.tBots[0];
+      b0.reset();
+      const refill = b0.utility.smoke === 1 && b0._throwSig === '';
+
+      return {
+        thrown, type: thrown.length ? thrown[0].type : null, smoke,
+        capOk, typesOk, usedSmoke, negOk, refill,
+        frames, phase: arena.round.phase,
+        queueAfter: map.world.botUtilityQueue.length,
+        projectiles: grenades.projectiles.length
+      };
+    `);
+
+    check('Bot 会投烟：走队列 → 生成投掷物 → 起烟',
+      botThrow.thrown.length >= 1 && botThrow.thrown.some((r) => r.type === 'smoke') && !!botThrow.smoke,
+      `投掷 ${JSON.stringify(botThrow.thrown)} 烟位置=${JSON.stringify(botThrow.smoke)}`);
+    check('Bot 投掷点取自包点周边（不写死坐标）',
+      !!botThrow.smoke && botThrow.smoke.nearSite >= 3 && botThrow.smoke.nearSite <= 26,
+      `烟距最近包点 ${botThrow.smoke ? botThrow.smoke.nearSite : 'n/a'} m`);
+    check('Bot 投掷有库存上限且不每帧扔',
+      botThrow.capOk && botThrow.typesOk && botThrow.usedSmoke >= 1 && botThrow.negOk && botThrow.queueAfter === 0,
+      `本回合投出 ${botThrow.thrown.length} 颗 / 上限 ${2}×人数 / 用完烟的 Bot=${botThrow.usedSmoke} / 队列残留=${botThrow.queueAfter}`);
+    check('Bot 投掷物每回合重发',
+      botThrow.refill === true,
+      `reset 后 smoke=${botThrow.refill}`);
+
+    /* 23. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
     const matchSoak = await cdp.eval(`
       const g = window.__game;
       const r = g.round;
       const origMode = r.mode;
       // 压缩时间参数：先到 3 分，2 局后换边，单局 20 秒
       const fast = Object.assign({}, origMode, {
-        winScore: 3, freezeTime: 0.3, roundTime: 20, bombTime: 8
+        winScore: 3, freezeTime: 0.3, roundTime: 60, bombTime: 8
       });
       r.beginMatch(fast);
+      // 统计整场 Bot 投掷次数：真要跑通「Bot 会投掷」这条链路
+      const origDrain = g.grenades._drainBotThrows.bind(g.grenades);
+      let botThrows = 0;
+      g.grenades._drainBotThrows = function () { botThrows += this.queue.length; return origDrain(); };
       let err = null, frames = 0;
-      for (let i = 0; i < 64 * 400; i++) {
+      let queueOk = false;
+      for (let i = 0; i < 64 * 700; i++) {
         try { g.simulate(1 / 64); } catch (e) { err = e.message; break; }
         frames++;
+        if (!queueOk && g.world.botUtilityQueue) queueOk = true;
         if (r.matchOver) break;
       }
       const nan = g.bots.filter((b) => !Number.isFinite(b.pos.x + b.pos.y + b.pos.z)).length;
@@ -1235,20 +1381,25 @@ async function main() {
         err, frames, matchOver: r.matchOver, score: [r.scoreT, r.scoreCT],
         swapCount: r.swapCount, overtime: r.overtime, nan,
         botsAlive: g.bots.filter((b) => b.alive).length,
-        moneyOk: g.bots.every((b) => b.money >= 0 && b.money <= 16000)
+        moneyOk: g.bots.every((b) => b.money >= 0 && b.money <= 16000),
+        botThrows, smokes: g.grenades.smokes.length, queueOk
       };
+      g.grenades._drainBotThrows = origDrain;
       r.beginMatch(origMode);
       g.money = 800; g.hud.setMoney(g.money);
       return out;
     `);
     check('整场对局无异常', matchSoak.err === null,
-      matchSoak.err ? matchSoak.err : `模拟 ${(matchSoak.frames / 64).toFixed(0)} s 无抛错`);
+      matchSoak.err ? matchSoak.err : `模拟 ${(matchSoak.frames / 64).toFixed(0)} s 无抛错，Bot 投掷 ${matchSoak.botThrows} 颗`);
     check('整场比分与坐标合法',
       matchSoak.matchOver && matchSoak.score[0] <= 3 && matchSoak.score[1] <= 3 &&
       matchSoak.nan === 0 && matchSoak.moneyOk,
       `比分 ${matchSoak.score.join(':')} / NaN=${matchSoak.nan} / 钱包合法=${matchSoak.moneyOk}`);
     check('整场至少换边一次', matchSoak.swapCount >= 1,
       `换边 ${matchSoak.swapCount} 次 / 加时 ${matchSoak.overtime}`);
+    check('真实地图整场 Bot 也会投掷',
+      matchSoak.queueOk === true && matchSoak.botThrows >= 1,
+      `投掷 ${matchSoak.botThrows} 颗 / 投掷通道=${matchSoak.queueOk}`);
 
     /* 汇总 */
     console.log('\n[smoke] ' + (results.length - failed) + '/' + results.length + ' 通过');
