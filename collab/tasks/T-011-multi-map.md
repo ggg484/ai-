@@ -64,6 +64,23 @@
 2. **每个包点中心 10 m 内要有可走格**。`NavGrid._nearestOpen` 只吸附 14 环（≈10.5 m）；包点若被实体几何完全包死，Bot 会判定不可达。
 3. **0.58 m 以上高台必须有 ≤0.3 m 的台阶**才能被 Bot 走上去（`NAV_STEP_UP = 0.35`）。上不去也没关系——下包判定已放宽到包点半径；但拆包仍要求贴身 1.7 m，炸弹落点必须可达。
 
+## 契约对照：OASIS（PR #23，只读核对）
+
+PR #23 合并后 main 前进到 `bfa08e2b`，本分支已 rebase 到该基线重跑。逐项对照：
+
+| 契约项 | OASIS 实现 | 结论 |
+|---|---|---|
+| `root` / `world` / `placed` / `baseCount` / `edits` | 齐 | ✅ |
+| `sites` | `{ A: {x:30,z:16,r:6.2}, B: {x:-30,z:16,r:6.2} }` | ✅ 两个点，键名 A/B |
+| `spawns` 六类 | `player` / `playerCT` / `allies` / `ctAllies` / `bots` / `tBots` | ✅ |
+| `waypoints` | 30+ 点 | ✅ |
+| `bounds` | `-47..47 / -43..43` | ✅ 仅雷达用 |
+| `buyZone` / `callouts` | 齐 | ✅ |
+| 地面 collider | `box(0, -0.1, 0, 92, 0.2, 84, tag:'ground')` | ✅ NavGrid 有底 |
+| 包点高台 | 无（平地） | ✅ Bot 可直接走到中心 |
+
+结论：OASIS 无需改动即可跑通 Bot 链路；合并后本分支 `npm run smoke` 仍 73/73。
+
 ## 合成地图 fixture
 
 `tools/map-fixture.mjs`：
