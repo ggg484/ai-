@@ -1353,7 +1353,100 @@ async function main() {
       botThrow.refill === true,
       `reset 后 smoke=${botThrow.refill}`);
 
-    /* 23. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
+    /* 23. 第三张地图 HARBOR：契约 / 审计 / 三线连通 / 包点入口 / Bot 下包（T-015） */
+    const harbor = await cdp.eval(`
+      const THREE = await import('/vendor/three.module.js');
+      const { buildHarbor } = await import('/js/world/map-harbor.js');
+      const { createArena } = await import('/tools/map-fixture.mjs');
+      const { audit } = await import('/js/dev/devtools.js');
+      const { NavGrid } = await import('/js/game/bots.js');
+
+      const root = new THREE.Group();
+      const map = buildHarbor(root, {});
+      const EXPECT = ['root', 'world', 'placed', 'baseCount', 'edits', 'id', 'name',
+        'sites', 'spawns', 'buyZone', 'bounds', 'waypoints', 'stats', 'callouts'];
+      const missing = EXPECT.filter((k) => map[k] === undefined || (map[k] === null && k !== 'edits'));
+
+      const issues = audit(map).map((it) => it.type + ' | ' + it.detail);
+      const nav = new NavGrid(map.world);
+      const pathLen = (x0, z0, x1, z1) => {
+        const p = nav.path(x0, z0, x1, z1);
+        if (!p) return -1;
+        let d = 0;
+        for (let i = 1; i < p.length; i++) d += Math.hypot(p[i].x - p[i - 1].x, p[i].z - p[i - 1].z);
+        return +d.toFixed(1);
+      };
+
+      const conn = {
+        tA: pathLen(map.spawns.player.x, map.spawns.player.z, map.sites.A.x, map.sites.A.z),
+        tB: pathLen(map.spawns.player.x, map.spawns.player.z, map.sites.B.x, map.sites.B.z),
+        ctA: pathLen(map.spawns.playerCT.x, map.spawns.playerCT.z, map.sites.A.x, map.sites.A.z),
+        ctB: pathLen(map.spawns.playerCT.x, map.spawns.playerCT.z, map.sites.B.x, map.sites.B.z),
+        tMid: pathLen(map.spawns.player.x, map.spawns.player.z, 0, 20),
+        ctHall: pathLen(map.spawns.playerCT.x, map.spawns.playerCT.z, -40, 31)
+      };
+
+      // 包点入口：从包点中心到各入口外侧的点，全部连通才算入口可用
+      const entA = [
+        pathLen(30, 18, 28, 9),        // 南正门
+        pathLen(30, 18, 17.5, 16.7),   // 西侧门
+        pathLen(30, 18, 41.2, 17.5),   // 东侧门（东平台）
+        pathLen(30, 18, 26.5, 30)      // 后门（经后巷）
+      ];
+      const entB = [
+        pathLen(-30, 19, -31, 9),      // 南正门
+        pathLen(-30, 19, -16.2, 17.6), // 东侧门
+        pathLen(-30, 19, -30.4, 30)    // 后门
+      ];
+
+      const tall = map.placed.filter((p) => p.tag === 'container' && p.h >= 2.4).length;
+      const stepsN = map.placed.filter((p) => p.tag === 'pallet').length;
+      const markers = root.children.filter((o) => o.isMesh && o.material && o.material.isMeshBasicMaterial).length;
+
+      // 真跑一局：T Bot 必须自己走到包点并把包放下
+      const arena = await createArena(map, { perTeam: 1 });
+      arena.begin();
+      arena.round._plantSite = 'A';
+      const planted = arena.runUntil((r) => r.phase === 'planted', 64 * 150);
+      const st = arena.state();
+
+      return {
+        id: map.id, name: map.name, missing, stats: map.stats, issues,
+        conn, entA, entB, tall, stepsN, markers,
+        arena: { planted, phase: st.phase, bomb: st.bomb, site: st.plantSite }
+      };
+    `);
+
+    check('HARBOR 注册且地图契约字段完整',
+      harbor.id === 'harbor' && harbor.name === '海港' && harbor.missing.length === 0,
+      `id=${harbor.id} 缺失=${JSON.stringify(harbor.missing)}`);
+    check('HARBOR 规模达标（掩体/导航/报点/建筑/装饰/墙体）',
+      harbor.stats.covers >= 30 && harbor.stats.waypoints >= 60 && harbor.stats.callouts >= 20 &&
+      harbor.stats.buildings >= 10 && harbor.stats.props >= 40 && harbor.stats.walls >= 30 &&
+      harbor.stats.placed >= 250,
+      `placed=${harbor.stats.placed} covers=${harbor.stats.covers} waypoints=${harbor.stats.waypoints} ` +
+      `callouts=${harbor.stats.callouts} buildings=${harbor.stats.buildings} props=${harbor.stats.props} walls=${harbor.stats.walls}`);
+    check('HARBOR 自动审计零问题',
+      harbor.issues.length === 0,
+      harbor.issues.length ? harbor.issues.slice(0, 3).join(' / ') : '出生点/导航点/包点全部通过');
+    check('HARBOR 三线 + 2 连接线全部连通',
+      harbor.conn.tA > 0 && harbor.conn.tB > 0 && harbor.conn.ctA > 0 &&
+      harbor.conn.ctB > 0 && harbor.conn.tMid > 0 && harbor.conn.ctHall > 0,
+      `T→A ${harbor.conn.tA}m / T→B ${harbor.conn.tB}m / CT→A ${harbor.conn.ctA}m / ` +
+      `CT→B ${harbor.conn.ctB}m / 中路 ${harbor.conn.tMid}m / CT 回防环 ${harbor.conn.ctHall}m`);
+    check('HARBOR A 点 ≥3 入口、B 点 ≥3 入口',
+      harbor.entA.filter((d) => d > 0).length >= 3 && harbor.entB.filter((d) => d > 0).length >= 3,
+      `A 入口 ${harbor.entA.filter((d) => d > 0).length}/4（${harbor.entA.join(', ')}） / ` +
+      `B 入口 ${harbor.entB.filter((d) => d > 0).length}/3（${harbor.entB.join(', ')}）`);
+    check('HARBOR 垂直差：可上人箱顶 + 台阶 + A/B 地面标识',
+      harbor.tall >= 6 && harbor.stepsN >= 8 && harbor.markers === 2,
+      `≥2.4 m 箱顶 ${harbor.tall} 个 / 台阶 ${harbor.stepsN} 级 / 地面标识 ${harbor.markers} 个`);
+    check('HARBOR Bot 自己走到 A 点并下包',
+      harbor.arena.planted && harbor.arena.bomb && harbor.arena.bomb.site === 'A' &&
+      Math.hypot(harbor.arena.bomb.x - 30, harbor.arena.bomb.z - 18) <= 6.2,
+      `phase=${harbor.arena.phase} bomb=${JSON.stringify(harbor.arena.bomb)}`);
+
+    /* 24. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
     const matchSoak = await cdp.eval(`
       const g = window.__game;
       const r = g.round;
