@@ -1,6 +1,7 @@
 // 地图注册表：后续第三张地图只需要在这里加一项。
 import { buildMap } from './map.js';
 import { buildOasis } from './map-oasis.js';
+import { buildHarbor } from './map-harbor.js';
 
 export const MAPS = {
   sandline: {
@@ -9,6 +10,13 @@ export const MAPS = {
     nameEn: 'SANDLINE',
     desc: 'A 大 / B 洞 / 中路，经典沙城三角',
     build: buildMap
+  },
+  harbor: {
+    id: 'harbor',
+    name: '海港',
+    nameEn: 'HARBOR',
+    desc: 'A 码头 / B 仓库 / 中路集装箱堆场，冷蓝海雾',
+    build: buildHarbor
   },
   oasis: {
     id: 'oasis',

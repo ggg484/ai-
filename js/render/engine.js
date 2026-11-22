@@ -267,6 +267,25 @@ export class Engine {
       this.fill.color.setHex(0x9fd0e8);
       this.fill.intensity = 0.36;
       this.renderer.toneMappingExposure = 1.05;
+    } else if (mood === 'harbor') {
+      // 港口：阴天海雾。低饱和冷蓝 + 铁锈色地标，和沙色 / 暖砂岩明确区分。
+      this.scene.fog.color.setHex(0x9fb2ba);
+      this.scene.fog.near = 34;
+      this.scene.fog.far = 158;
+      this.skyMat.uniforms.zenith.value.setHex(0x2a4a63);
+      this.skyMat.uniforms.horizon.value.setHex(0xa9bec6);
+      this.skyMat.uniforms.ground.value.setHex(0x3d4c50);
+      this.skyMat.uniforms.sunDir.value.set(0.24, 0.42, 0.86);
+      this.skyMat.uniforms.cloudiness.value = 0.78;
+      this.sun.color.setHex(0xd6e2e8);
+      this.sun.intensity = 1.5;
+      this.sun.position.set(18, 40, 56);
+      this.hemi.color.setHex(0xc2d6de);
+      this.hemi.groundColor.setHex(0x515d5c);
+      this.hemi.intensity = 1.2;
+      this.fill.color.setHex(0x8fb2c6);
+      this.fill.intensity = 0.42;
+      this.renderer.toneMappingExposure = 0.98;
     } else {
       this.scene.fog.color.setHex(0xbfe4f5);
       this.scene.fog.near = 62;

@@ -462,9 +462,11 @@ export class Game {
     this.crowd.setVisible(false);
     this.matchRoot.visible = true;
     this.world = this.map.world;
-    this.engine.setMood(this.mapId === 'oasis' ? 'oasis' : 'match');
+    const mood = this.mapId === 'oasis' ? 'oasis' : this.mapId === 'harbor' ? 'harbor' : 'match';
+    this.engine.setMood(mood);
     // 对局使用随包/工坊预览的光照；回大厅时 setMood('lobby') 会恢复大厅光照。
-    if (window.__lighting) this.engine.applyLighting(window.__lighting);
+    // 港口例外：随包 lighting.json 是沙城日落，套上去会把冷蓝海雾染回沙色。
+    if (window.__lighting && mood !== 'harbor') this.engine.applyLighting(window.__lighting);
 
     this.hud.showHud(true);
     this.hud.setMoney(this.money);

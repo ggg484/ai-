@@ -258,6 +258,55 @@ const SHOTS = [
     wait: 1500
   },
   {
+    file: '70-harbor.png',
+    url: '?map=harbor&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(-4.5, 0, -38.6, 0); g.player.pitch = 0.02; return 1;',
+    wait: 2200
+  },
+  {
+    file: '71-harbor-a.png',
+    url: '?map=harbor&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(36, 0, -18, 0); g.player.pitch = 0.02; return 1;',
+    wait: 2200
+  },
+  {
+    file: '72-harbor-b.png',
+    url: '?map=harbor&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(-41, 0, 3.6, 2.55); g.player.pitch = 0.02; return 1;',
+    wait: 2200
+  },
+  {
+    file: '73-harbor-overview.png',
+    url: '?map=harbor&autostart=1&quality=high&shadows=0&noadapt=1&dev=1',
+    ready: 'return !!(window.__devTools && window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'window.__devTools.setCam({ x: 4, y: 64, z: -6, pitch: -1.24, yaw: 0, fov: 72 }); return 1;',
+    wait: 2200
+  },
+  {
+    file: '74-harbor-bots.png',
+    url: '?map=harbor&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: `
+      const g = window.__game;
+      if (g.mapId !== 'harbor' || g.bots.length !== 9) throw new Error('harbor init');
+      if (!g.map.stats || g.map.stats.covers < 30 || g.map.stats.waypoints < 60 || g.map.stats.callouts < 20) throw new Error('harbor depth');
+      if (Math.abs(g.player.position.z + 41) > 1 || Math.abs(g.player.position.x) > 1) throw new Error('spawn');
+      const before = g.bots.map((b) => ({ x: b.pos.x, z: b.pos.z }));
+      g.round.phase = 'live';
+      for (let i = 0; i < 180; i++) g.simulate(1 / 64);
+      const moved = g.bots.filter((b, i) => Math.hypot(b.pos.x - before[i].x, b.pos.z - before[i].z) > 0.5).length;
+      if (moved < 3) throw new Error('bots stuck: ' + moved);
+      // 回到冻结期：全员在出生点，机位从北侧回看，画面里必须真的有人。
+      g.round.beginMatch();
+      g.teleportTo(0, 0, -36.2, Math.PI);
+      g.player.pitch = 0.02;
+      return 1;`,
+    wait: 1500
+  },
+  {
     file: '21-lobby-crowd.png',
     url: '?quality=high&noadapt=1&crowd=220&far=180',
     ready: 'return !!(window.__game && window.__game.mode === "lobby" && window.__game.started)',
