@@ -1446,7 +1446,24 @@ async function main() {
       Math.hypot(harbor.arena.bomb.x - 30, harbor.arena.bomb.z - 18) <= 6.2,
       `phase=${harbor.arena.phase} bomb=${JSON.stringify(harbor.arena.bomb)}`);
 
-    /* 24. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
+    /* 24. 外部模型资产：8 把武器 + 8 个道具的 glb 必须真的加载进来 */
+    const assets = await cdp.eval(`
+      const m = await import('/js/render/model-assets.js');
+      const g = window.__game;
+      g.setWeapon('ak');
+      const gun = g.viewmodel.guns['ak'];
+      const names = [];
+      let meshes = 0;
+      if (gun) gun.traverse(o => { if (o.isMesh && o.visible) { meshes++; if (o.material && o.material.name) names.push(o.material.name); } });
+      return { weapons: m.loadedWeaponModels(), props: m.loadedPropModels(), settled: m.weaponModelsSettled(),
+               meshes, mats: [...new Set(names)], muzzle: !!(gun && gun.userData.muzzle) };
+    `);
+    check('GLB 武器资产全部接入', assets.weapons === 8 && assets.settled, `weapons=${assets.weapons}/8`);
+    check('GLB 道具资产全部接入', assets.props === 8, `props=${assets.props}/8`);
+    check('第一人称使用 GLB 模型', assets.meshes >= 6 && (assets.mats.includes('metal') || assets.mats.includes('gunmetal')) && assets.muzzle,
+      `${assets.meshes} meshes / ${assets.mats.join(',')}`);
+
+    /* 25. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
     const matchSoak = await cdp.eval(`
       const g = window.__game;
       const r = g.round;

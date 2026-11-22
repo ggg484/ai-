@@ -4,6 +4,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { mergeGeos } from '../world/geo-utils.js';
 import { metalTexture, polymerTexture, woodTexture } from '../world/textures.js';
+import { buildPropAsset } from './model-assets.js';
 
 let MATS = null;
 
@@ -383,8 +384,9 @@ export const PROP_INFO = {
 };
 
 export function buildPropModel(id) {
-  const fn = BUILDERS[id] || BUILDERS.case;
-  const g = fn();
+  // 优先用 tools/assetgen 导出的 glb（可在 Blockbench 里编辑）；缺失时回退程序化几何。
+  const asset = buildPropAsset(id);
+  const g = asset || (BUILDERS[id] || BUILDERS.case)();
   g.userData.weaponId = 'prop';
   return g;
 }

@@ -9,7 +9,9 @@
     "pack": "node scripts/pack.mjs",
     "dev": "node scripts/serve.mjs",
     "smoke": "node tools/smoke.mjs",
-    "smoke:lobby": "node tools/smoke.mjs --no-xvfb --lobby"
+    "smoke:lobby": "node tools/smoke.mjs --no-xvfb --lobby",
+    "assets:weapons": "node tools/assetgen/export.mjs",
+    "assets:props": "node tools/assetgen/export-props.mjs"
   },
   "engines": {
     "node": ">=18"

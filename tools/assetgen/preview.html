@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模型预览 · Model Preview</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #14181c; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; left: 16px; bottom: 14px; color: #9fb2ba;
+    font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; pointer-events: none;
+    text-shadow: 0 1px 6px #000;
+  }
+  #hud b { color: #e8f0f4; font-size: 13px; letter-spacing: .06em; }
+  #err {
+    position: fixed; inset: 0; display: none; place-items: center; padding: 40px;
+    color: #ff9a8a; font: 13px/1.7 ui-monospace, monospace; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div id="hud"><b id="name">—</b><div id="stat"></div></div>
+<div id="err"></div>
+<script type="importmap">
+{ "imports": { "three": "/vendor/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from '/vendor/three.module.js';
+import { GLTFLoader } from '/vendor/GLTFLoader.js';
+
+const q = new URLSearchParams(location.search);
+const file = q.get('f') || '/assets/models/weapons/ak.glb';
+const spin = q.get('spin') !== '0';
+const view = q.get('view') || 'three-quarter';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b333a);
+scene.fog = new THREE.Fog(0x2b333a, 5, 16);
+
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.01, 100);
+
+// 三点光：主光暖、补光冷、轮廓光从背后勾边。
+const key = new THREE.DirectionalLight(0xfff2e2, 6.0);
+key.position.set(2.4, 3.2, 2.6);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.near = 0.5;
+key.shadow.camera.far = 12;
+key.shadow.bias = -0.0008;
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0xa8d4ec, 2.8);
+fill.position.set(-2.8, 1.2, 1.8);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0xd8e8f0, 3.4);
+rim.position.set(-1.2, 1.6, -3.2);
+scene.add(rim);
+
+scene.add(new THREE.HemisphereLight(0xc6dce8, 0x3a4248, 1.5));
+
+// 地面：只做接触阴影，不要抢主体。
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x39434a, roughness: 0.92, metalness: 0.05 });
+const floor = new THREE.Mesh(new THREE.CircleGeometry(9, 64), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+floor.position.y = -0.42;
+scene.add(floor);
+const grid = new THREE.GridHelper(6, 24, 0x53646e, 0x434e56);
+grid.position.y = -0.419;
+scene.add(grid);
+
+let target = new THREE.Group();
+scene.add(target);
+
+// 手写轨道控制（不引 OrbitControls，保持零依赖）。
+let yaw = -0.55, pitch = 0.30, dist = 1.7;
+let dragging = false, px = 0, py = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => { dragging = true; px = e.clientX; py = e.clientY; });
+addEventListener('pointerup', () => { dragging = false; });
+addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  yaw -= (e.clientX - px) * 0.008;
+  pitch = Math.max(-0.5, Math.min(1.25, pitch + (e.clientY - py) * 0.006));
+  px = e.clientX; py = e.clientY;
+});
+renderer.domElement.addEventListener('wheel', (e) => {
+  dist = Math.max(0.35, Math.min(8, dist * (1 + Math.sign(e.deltaY) * 0.08)));
+  e.preventDefault();
+}, { passive: false });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function frame(obj, pad = 1.0) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  obj.position.sub(center);
+  const max = Math.max(size.x, size.y, size.z) * pad;
+  dist = max / (2 * Math.tan((camera.fov * Math.PI) / 360)) * 1.05;
+  return { size, center };
+}
+
+const nameEl = document.getElementById('name');
+const statEl = document.getElementById('stat');
+
+new GLTFLoader().loadAsync(file).then((gltf) => {
+  const root = gltf.scene;
+  let tris = 0, meshes = 0, mats = new Set();
+  root.traverse((n) => {
+    if (!n.isMesh) return;
+    meshes++;
+    if (n.material) (Array.isArray(n.material) ? n.material : [n.material]).forEach((m) => mats.add(m.name || m.uuid));
+    n.castShadow = true;
+    n.receiveShadow = true;
+    const g = n.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+  });
+  target.add(root);
+  const { size } = frame(root, 1.02);
+  nameEl.textContent = file.split('/').pop();
+  statEl.textContent = `${tris|0} tris · ${meshes} meshes · ${mats.size} materials · ` +
+    `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m`;
+  if (view === 'front') { yaw = Math.PI; pitch = 0.05; }
+  if (view === 'side') { yaw = -Math.PI / 2; pitch = 0.05; }
+  if (view === 'top') { yaw = 0; pitch = 1.35; }
+  window.__previewReady = true;
+}).catch((e) => {
+  const el = document.getElementById('err');
+  el.style.display = 'grid';
+  el.textContent = '加载失败：' + file + '\n' + (e && e.message ? e.message : e);
+  window.__previewReady = 'error';
+});
+
+const clock = new THREE.Clock();
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (spin && !dragging) yaw += dt * 0.35;
+  const cy = Math.cos(pitch);
+  camera.position.set(
+    Math.sin(yaw) * cy * dist,
+    Math.sin(pitch) * dist,
+    Math.cos(yaw) * cy * dist
+  );
+  camera.lookAt(0, 0, 0);
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>
