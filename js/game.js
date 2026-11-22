@@ -3,7 +3,7 @@
 
 import * as THREE from '../../vendor/three.module.js';
 import { Engine } from './render/engine.js';
-import { buildMap } from './world/map.js';
+import { mapById } from './world/maps.js';
 import { loadStoredEdits } from './world/map-edits.js';
 import { loadPhotoTextures } from './world/textures.js';
 import { refreshWeaponTextures } from './render/weapon-models.js';
@@ -78,7 +78,15 @@ export class Game {
     const mapEdits = /[?&]mapEdits=1/.test(location.search)
       ? loadStoredEdits()
       : (window.__mapEdits || null);
-    this.map = buildMap(this.matchRoot, { edits: mapEdits });
+    const mapParam = (/[?&]map=([a-z0-9_-]+)/.exec(location.search) || [])[1];
+    const mapDef = mapById(mapParam);
+    this.mapId = mapDef.id;
+    this.mapName = mapDef.name;
+    this.mapNameEn = mapDef.nameEn;
+    this.hud.setMapName(this.mapNameEn || this.mapName);
+    this.map = mapDef.build(this.matchRoot, {
+      edits: mapDef.id === 'sandline' ? mapEdits : null
+    });
     // 5v5：5 名 CT 敌人 + 4 名 T 队友（玩家是 T 方第 5 人）
     this.enemyBots = this.map.spawns.bots.map((s) => new Bot(this.matchRoot, s, this.map.world, {
       team: 'ct', rig: window.__charRig
@@ -454,7 +462,7 @@ export class Game {
     this.crowd.setVisible(false);
     this.matchRoot.visible = true;
     this.world = this.map.world;
-    this.engine.setMood('match');
+    this.engine.setMood(this.mapId === 'oasis' ? 'oasis' : 'match');
     // 对局使用随包/工坊预览的光照；回大厅时 setMood('lobby') 会恢复大厅光照。
     if (window.__lighting) this.engine.applyLighting(window.__lighting);
 
