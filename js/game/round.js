@@ -138,7 +138,7 @@ export class Round {
       : (this.swapCount > 0 ? '下半场 · 购买时间' : '购买时间'));
     g.hud.setObjective(this.overtime > 0
       ? `加时赛 ${this.overtime} · 先到 ${OVERTIME.winScore} 分`
-      : (this.playerSide === 'ct' ? '购买装备，准备防守 A / B' : '购买装备，准备进攻 A / B'));
+      : ('购买装备，准备' + (this.playerSide === 'ct' ? '防守 ' : '进攻 ') + this.siteLabel()));
     g.hud.setBomb(false);
     g.hud.setRound(this.round);
     g.hud.setScore(this.scoreT, this.scoreCT);
@@ -170,7 +170,7 @@ export class Round {
         this.phase = PHASE.LIVE;
         this.timer = this.mode.roundTime || 100;
         g.hud.setPhase('进行中');
-        g.hud.setObjective('在 A / B 点安放炸弹');
+        g.hud.setObjective('在 ' + this.siteLabel() + ' 点安放炸弹');
       }
       return;
     }
@@ -271,7 +271,12 @@ export class Round {
     const tBots = g.tBots || g.allyBots;
     const ctBots = g.ctBots || g.enemyBots;
     if (phase === PHASE.LIVE) {
-      if (!this._plantSite) this._plantSite = Math.random() < 0.5 ? 'A' : 'B';
+      const keys = this.siteKeys();
+      // 地图没给包点就没法下包：直接不指派，避免 undefined.x 崩掉整局
+      if (!keys.length) return;
+      if (!this._plantSite || keys.indexOf(this._plantSite) < 0) {
+        this._plantSite = keys[Math.floor(Math.random() * keys.length)];
+      }
       const s = g.map.sites[this._plantSite];
       let best = null;
       let bestD = 1e9;
@@ -285,19 +290,27 @@ export class Round {
       for (const b of tBots) {
         if (!b.alive) continue;
         if (b === best) {
-          if (!b.objective || b.objective.type !== 'plant') {
-            b.objective = { type: 'plant', x: s.x, z: s.z };
+          const cur = b.objective;
+          // 目标点跟着当前包点走：换点（或上一个目标还是旧包点）必须重新下发，
+          // 否则多包点地图上会出现「计划换 B，人还在往 A 跑」。
+          if (!cur || cur.type !== 'plant' || cur.x !== s.x || cur.z !== s.z) {
+            // 带上包点半径：包点中心常是 0.58 m 高台（Bot 上不去），
+            // 只要站进 site.r 就算到位，按真实规则「包点内任意位置可下包」。
+            b.objective = { type: 'plant', x: s.x, z: s.z, r: s.r };
           }
         } else if (!b.objective || b.objective.type !== 'push') {
           b.objective = this._objectiveFor(b, s.x, s.z, b.role, 'push');
         }
       }
-      // CT 防守：anchor 守包点（A/B 交替），entry/rotator 保持巡逻
+      // CT 防守：anchor 守包点。主守包点在首位，其余包点轮转，
+      // 所以 2 个点时的行为与旧版（A/B 交替）完全一致，3 个点也能覆盖到。
       const guards = ctBots.filter((b) => b.alive && b.role === 'anchor');
+      const patrol = [this._plantSite].concat(keys.filter((k) => k !== this._plantSite));
       guards.forEach((b, i) => {
-        const key = i % 2 === 0 ? this._plantSite : (this._plantSite === 'A' ? 'B' : 'A');
+        const key = patrol[i % patrol.length];
         const gs = g.map.sites[key];
-        if (!b.objective || b.objective.type !== 'guard') {
+        const cur = b.objective;
+        if (!cur || cur.type !== 'guard' || cur.x !== gs.x || cur.z !== gs.z) {
           b.objective = { type: 'guard', x: gs.x, z: gs.z };
         }
       });
@@ -378,6 +391,22 @@ export class Round {
       if (this.phase === PHASE.PLANTED) g.hud.setObjective('守住炸弹直到引爆');
     }
     if (this.bomb) this.bomb.defuse = this._defuseProgress;
+  }
+
+  /**
+   * 地图契约：包点集合完全由 map.sites 的键决定。
+   * 回合层不假定「两个点」「键名叫 A/B」——第二张地图可以给 1~N 个点、任意键名。
+   */
+  siteKeys() {
+    const sites = (this.game.map && this.game.map.sites) || {};
+    return Object.keys(sites);
+  }
+
+  /** HUD 用包点标签；地图没提供 sites 时退回通用文案。 */
+  siteLabel() {
+    const keys = this.siteKeys();
+    // 只有「地图完全没给 sites」这种非法地图才会用到兜底文案
+    return keys.length ? keys.join(' / ') : 'A / B';
   }
 
   siteAt(x, z) {
@@ -507,7 +536,7 @@ export class Round {
     g.money = Math.min(ECONOMY.cap, this.mode.startMoney || ECONOMY.start);
     if (g.hud && g.hud.setMoney) g.hud.setMoney(g.money);
     if (g.hud && g.hud.setObjective) {
-      g.hud.setObjective(next === 'ct' ? '下半场：防守 A / B' : '下半场：进攻 A / B');
+      g.hud.setObjective('下半场：' + (next === 'ct' ? '防守 ' : '进攻 ') + this.siteLabel());
     }
     audio.play('beep', { volume: 0.5 });
   }

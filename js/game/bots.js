@@ -75,6 +75,10 @@ const NAV_CLEAR_CAP = 3;       // 离墙距离上限，用于让路径尽量走�
 const NAV_LIMIT = 26000;       // A* 单次展开上限，极端情况下宁可放弃也不卡帧
 const NAV_SQRT2 = Math.SQRT2;
 
+// 视野上限：这是玩法尺度，不是地图尺寸。实际生效值再按导航网格跨度夹取，
+// 保证任何地图上都不会查询超出网格范围的敌人（大地图仍是 44 m，小地图自动收紧）。
+const BOT_VIEW_RANGE = 44;
+
 const NAV_DIRS = [
   [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
   [1, 1, NAV_SQRT2], [1, -1, NAV_SQRT2], [-1, 1, NAV_SQRT2], [-1, -1, NAV_SQRT2]
@@ -412,7 +416,8 @@ export class Bot {
     this.grounded = true;
     this.shootCd = 1.2 + Math.random() * 0.8;
     this.reaction = 0;
-    this.spawnWaypoint = spawn.waypoint != null ? spawn.waypoint : (seq * 3) % 8;
+    // 出生点自带 waypoint 时用它；地图没给就从第 0 个航点开始（长度由地图决定，不写死 8）
+    this.spawnWaypoint = spawn.waypoint != null ? spawn.waypoint : 0;
     this.waypoint = this.spawnWaypoint;
     this.stuck = 0;
     this.lastPos = this.pos.clone();
@@ -638,6 +643,14 @@ export class Bot {
     return (out || new THREE.Vector3()).set(this.pos.x, this.pos.y + 1.55, this.pos.z);
   }
 
+  /** 实际视野：BOT_VIEW_RANGE 与导航网格对角线的较小值（小地图自动收紧）。 */
+  viewRange() {
+    const nav = this.nav;
+    if (!nav) return BOT_VIEW_RANGE;
+    const span = Math.hypot(nav.w, nav.h) * nav.step;
+    return Math.min(BOT_VIEW_RANGE, span);
+  }
+
   /** 选择最近的可见敌人；ctx = { player, playerTeam, tBots, ctBots }。 */
   _pickTarget(ctx) {
     const playerTeam = ctx.playerTeam || 't';
@@ -653,12 +666,13 @@ export class Bot {
     }
     let best = null;
     let bestD = 1e9;
+    const maxD = this.viewRange();
     for (const item of list) {
       const u = item.unit;
       const px = item.player ? u.position.x : u.pos.x;
       const pz = item.player ? u.position.z : u.pos.z;
       const d = Math.hypot(px - this.pos.x, pz - this.pos.z);
-      if (d >= 44 || d >= bestD) continue;
+      if (d >= maxD || d >= bestD) continue;
       const pe = item.player ? u.eye(new THREE.Vector3()) : u.eye(new THREE.Vector3());
       if (!this.world.lineOfSight(this.pos.x, this.pos.y + 1.55, this.pos.z, pe.x, pe.y, pe.z)) continue;
       bestD = d;
@@ -866,9 +880,11 @@ export class Bot {
     const o = this.objective;
     if (!o) return out;
     const d = Math.hypot(o.x - this.pos.x, o.z - this.pos.z);
-    // 下包 / 拆包要贴到 0.9 m 并站定；push / guard / retake 到 2 m 就算到位
+    // 下包 / 拆包要贴到 0.9 m 并站定；push / guard / retake 到 2 m 就算到位。
+    // 下包额外接受「进入包点半径」：包点中心常是上不去的高台，站到台边就该开始下包。
     const isAction = o.type === 'plant' || o.type === 'defuse';
-    if (d < (isAction ? 0.9 : 2.0)) {
+    const reach = o.type === 'plant' && o.r > 0 ? Math.max(0.9, o.r - 0.6) : (isAction ? 0.9 : 2.0);
+    if (d < reach) {
       this.holding = isAction;
       this.path.length = 0;
       this.pathI = 0;
