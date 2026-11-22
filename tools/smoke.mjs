@@ -1104,7 +1104,116 @@ async function main() {
     // v0.2 换成真武器/人物模型后三角面上调；仍远低于 PRINCIPLES 的 250k 移动端预算
     check('三角形 ≤ 80000', perf.tris <= 80000, 'tris=' + perf.tris);
 
-    /* 20. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
+    /* 20. 合成地图：地图无关回归（T-011） */
+    const fixture = await cdp.eval(`
+      const { buildFixtureMap, createArena } = await import('/tools/map-fixture.mjs');
+      const map = buildFixtureMap({ siteCount: 2 });
+
+      // 契约自查：字段名与 buildMap() 完全一致
+      const contract = {
+        hasWorld: !!(map.world && map.world.colliders && typeof map.world.raycast === 'function'),
+        hasRoot: !!map.root,
+        bounds: map.bounds,
+        siteKeys: Object.keys(map.sites),
+        spawnKeys: Object.keys(map.spawns),
+        waypoints: map.waypoints.length,
+        callouts: Object.keys(map.callouts).length,
+        buyZone: !!map.buyZone
+      };
+
+      const arena = await createArena(map);
+      arena.begin();
+      // 固定攻打 A，保证断言可复现（随机选点本身也是被测行为）
+      arena.round._plantSite = 'A';
+
+      // 1) A*：T 出生点 → A 点。中墙挡路，路径必须绕行（长于直线）
+      const siteA = map.sites.A;
+      const path = arena.tBots[0].nav.path(0, -26, siteA.x, siteA.z);
+      let pathLen = 0;
+      if (path) {
+        for (let i = 0; i < path.length; i++) {
+          const p = path[i];
+          const q = path[i - 1] || { x: 0, z: -26 };
+          pathLen += Math.hypot(p.x - q.x, p.z - q.z);
+        }
+      }
+      const straight = Math.hypot(siteA.x, siteA.z + 26);
+
+      // 2) 下包：进入 live 后由 round 指派，Bot 自己走到包点
+      const live = arena.runUntil((r) => r.phase === 'live', 64 * 16);
+      const planted = arena.runUntil((r) => r.phase === 'planted', 64 * 45);
+      const plantState = arena.state();
+
+      // 3) 拆包 + 结算：CT Bot 自己走到炸弹
+      const defused = planted ? arena.runUntil((r) => r.phase === 'ended', 64 * 45) : false;
+      const endState = arena.state();
+
+      return {
+        contract, live, planted, defused, plantState, endState,
+        pathing: { cells: path ? path.length : 0, pathLen: +pathLen.toFixed(1), straight: +straight.toFixed(1) }
+      };
+    `);
+
+    const fc = fixture.contract;
+    const EXPECT_SPAWNS = ['player', 'playerCT', 'allies', 'ctAllies', 'bots', 'tBots'];
+    check('合成地图契约与 map.js 一致',
+      fc.hasWorld && fc.hasRoot && fc.buyZone && fc.callouts > 0 &&
+      EXPECT_SPAWNS.every((k) => fc.spawnKeys.indexOf(k) >= 0) && fc.waypoints > 0,
+      `spawns=${fc.spawnKeys.length} waypoints=${fc.waypoints} callouts=${fc.callouts}`);
+    check('合成地图 64×64 且两个包点',
+      fc.bounds.maxX - fc.bounds.minX === 64 && fc.bounds.maxZ - fc.bounds.minZ === 64 &&
+      fc.siteKeys.join('/') === 'A/B',
+      `${fc.bounds.maxX - fc.bounds.minX}×${fc.bounds.maxZ - fc.bounds.minZ} sites=${fc.siteKeys.join('/')}`);
+    check('合成地图 A* 绕开中墙',
+      fixture.pathing.cells > 0 && fixture.pathing.pathLen > fixture.pathing.straight + 4,
+      `路径 ${fixture.pathing.cells} 格 ${fixture.pathing.pathLen} m / 直线 ${fixture.pathing.straight} m`);
+    check('合成地图 Bot 走到包点自动下包',
+      fixture.planted && fixture.plantState.bomb && fixture.plantState.bomb.site === 'A' &&
+      Math.hypot(fixture.plantState.bomb.x - 18, fixture.plantState.bomb.z - 10) <= 5,
+      `phase=${fixture.plantState.phase} bomb=${JSON.stringify(fixture.plantState.bomb)} 站点=${fixture.plantState.plantSite}`);
+    check('合成地图 CT Bot 拆包并结算',
+      fixture.defused && fixture.endState.phase === 'ended' &&
+      fixture.endState.result === false && fixture.endState.score[1] === 1 && !fixture.endState.bomb,
+      `phase=${fixture.endState.phase} result=${fixture.endState.result} 比分=${fixture.endState.score.join(':')}`);
+
+    /* 21. 三包点地图：包点数量不再写死（T-011） */
+    const fixture3 = await cdp.eval(`
+      const { buildFixtureMap, createArena } = await import('/tools/map-fixture.mjs');
+      const map = buildFixtureMap({ siteCount: 3 });
+      const arena = await createArena(map);
+      arena.begin();
+      arena.runUntil((r) => r.phase === 'live', 64 * 16);
+      const r = arena.round;
+      r._plantSite = 'C';
+      r._assignBotObjectives('live');
+      const planter = r._planter;
+      const obj = planter && planter.objective;
+      const target = obj ? { x: +obj.x.toFixed(1), z: +obj.z.toFixed(1), r: obj.r } : null;
+      // 强制换包点后必须重新指派，不能继续用旧目标
+      r._plantSite = 'B';
+      r._assignBotObjectives('live');
+      const obj2 = r._planter && r._planter.objective;
+      return {
+        keys: r.siteKeys(),
+        label: r.siteLabel(),
+        target,
+        siteC: { x: +map.sites.C.x.toFixed(1), z: +map.sites.C.z.toFixed(1), r: map.sites.C.r },
+        retarget: obj2 ? { x: +obj2.x.toFixed(1), z: +obj2.z.toFixed(1) } : null,
+        siteB: { x: +map.sites.B.x.toFixed(1), z: +map.sites.B.z.toFixed(1) }
+      };
+    `);
+    check('三包点地图：site 键与 HUD 标签按地图生成',
+      fixture3.keys.join('/') === 'A/B/C' && fixture3.label === 'A / B / C',
+      `keys=${fixture3.keys.join('/')} label="${fixture3.label}"`);
+    check('三包点地图：第三个点能被指派为下包点',
+      !!fixture3.target && fixture3.target.x === fixture3.siteC.x &&
+      fixture3.target.z === fixture3.siteC.z && fixture3.target.r === fixture3.siteC.r,
+      `objective=${JSON.stringify(fixture3.target)} / siteC=${JSON.stringify(fixture3.siteC)}`);
+    check('三包点地图：换包点后目标跟着改',
+      !!fixture3.retarget && fixture3.retarget.x === fixture3.siteB.x && fixture3.retarget.z === fixture3.siteB.z,
+      `objective=${JSON.stringify(fixture3.retarget)} / siteB=${JSON.stringify(fixture3.siteB)}`);
+
+    /* 22. 整场回归：纯 Bot 从开局打到结束（T-009 阶段 4） */
     const matchSoak = await cdp.eval(`
       const g = window.__game;
       const r = g.round;
