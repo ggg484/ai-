@@ -55,3 +55,5 @@
 ```
 
 或大厅“选择对局模式”面板底部的地图选择器。
+
+设计方法、20 项复杂度评分和“为什么放每个元素”的完整总结见 [MAP-DESIGN-PLAYBOOK.md](MAP-DESIGN-PLAYBOOK.md)。

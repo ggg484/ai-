@@ -213,6 +213,51 @@ const SHOTS = [
     wait: 2500
   },
   {
+    file: '60-oasis.png',
+    url: '?map=oasis&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(0, 0, -30, 0); g.player.pitch = 0.02; return 1;',
+    wait: 2200
+  },
+  {
+    file: '61-oasis-a.png',
+    url: '?map=oasis&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(30, 0.5, 12, 0); g.player.pitch = 0.04; return 1;',
+    wait: 2200
+  },
+  {
+    file: '62-oasis-b.png',
+    url: '?map=oasis&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'const g = window.__game; g.teleportTo(-30, 0.5, 12, 0); g.player.pitch = 0.04; return 1;',
+    wait: 2200
+  },
+  {
+    file: '63-oasis-overview.png',
+    url: '?map=oasis&autostart=1&quality=high&shadows=0&noadapt=1&dev=1',
+    ready: 'return !!(window.__devTools && window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: 'window.__devTools.setCam({ x: 0, y: 58, z: -8, pitch: -1.25, yaw: 0, fov: 70 }); return 1;',
+    wait: 2200
+  },
+  {
+    file: '64-oasis-bots.png',
+    url: '?map=oasis&autostart=1&quality=high&shadows=0&noadapt=1',
+    ready: 'return !!(window.__game && window.__game.mode === "match" && window.__game.started)',
+    action: `
+      const g = window.__game;
+      if (g.mapId !== 'oasis' || g.bots.length !== 9) throw new Error('oasis init');
+      if (!g.map.stats || g.map.stats.covers < 30 || g.map.stats.waypoints < 55 || g.map.stats.callouts < 18) throw new Error('oasis depth');
+      if (Math.abs(g.player.position.z + 36) > 1 || Math.abs(g.player.position.x) > 1) throw new Error('spawn');
+      const before = g.bots.map((b) => ({ x: b.pos.x, z: b.pos.z }));
+      g.round.phase = 'live';
+      for (let i = 0; i < 180; i++) g.simulate(1 / 64);
+      const moved = g.bots.filter((b, i) => Math.hypot(b.pos.x - before[i].x, b.pos.z - before[i].z) > 0.5).length;
+      if (moved < 3) throw new Error('bots stuck: ' + moved);
+      return 1;`,
+    wait: 1500
+  },
+  {
     file: '21-lobby-crowd.png',
     url: '?quality=high&noadapt=1&crowd=220&far=180',
     ready: 'return !!(window.__game && window.__game.mode === "lobby" && window.__game.started)',
